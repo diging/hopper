@@ -5,6 +5,12 @@ from django.db import models
 
 # Abstract Model, fields are inherited by subclasses
 class Resource(models.Model):
+    class Status(models.TextChoices):
+        PROCESSING = "processing", "Processing"
+        SUCCESS = "success", "Success"
+        ERROR = "error", "Error"
+        WARNING = "warning", "Warning"
+
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True, default="")
     creator = models.ForeignKey(
@@ -21,6 +27,12 @@ class Resource(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     modified_at = models.DateTimeField(auto_now=True)
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.SUCCESS,
+    )
+    status_message = models.TextField(blank=True, default="")
 
     class Meta:
         abstract = True
