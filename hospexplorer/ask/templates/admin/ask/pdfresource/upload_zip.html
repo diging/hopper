@@ -13,7 +13,7 @@
 <h1>{{ title }}</h1>
 <p>
     Upload a <code>.zip</code> containing PDF files and a single CSV metadata file
-    with columns <code>filename,title</code>. Each row creates a PDF Resource
+    with columns <code>{{ required_columns_label }}</code>. Each row creates a PDF Resource
     and pushes the file to the Knowledge Base.
 </p>
 <form method="post" enctype="multipart/form-data">

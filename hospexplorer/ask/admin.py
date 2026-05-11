@@ -244,6 +244,9 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
         "file": "The PDF file the LLM will use as context when answering questions.",
     }
 
+    # column names the bulk-import CSV must define (first = zip member, second = resource title)
+    zip_csv_required_columns = ("filename", "title")
+
     def get_form(self, request, obj=None, **kwargs):
         form = super().get_form(request, obj, **kwargs)
         for field_name, text in self.help_texts.items():
@@ -285,6 +288,9 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
 
     def zip_upload_view(self, request):
         changelist_url = reverse("admin:ask_pdfresource_changelist")
+        filename_col, title_col = self.zip_csv_required_columns
+        required_columns = set(self.zip_csv_required_columns)
+        required_columns_label = ", ".join(self.zip_csv_required_columns)
 
         if request.method == "POST":
             zip_file = request.FILES.get("zip_file")
@@ -308,7 +314,10 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
 
                 csv_names = [n for n in real_names if n.lower().endswith(".csv")]
                 if len(csv_names) == 0:
-                    messages.error(request, "Zip must contain one CSV metadata file (filename,title).")
+                    messages.error(
+                        request,
+                        f"Zip must contain one CSV metadata file ({required_columns_label}).",
+                    )
                     return HttpResponseRedirect(request.path)
                 if len(csv_names) > 1:
                     messages.error(request, f"Zip must contain exactly one CSV; found {len(csv_names)}.")
@@ -316,9 +325,10 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
 
                 csv_text = archive.read(csv_names[0]).decode("utf-8-sig")
                 reader = csv.DictReader(io.StringIO(csv_text))
-                required = {"filename", "title"}
-                if not required.issubset({(h or "").strip() for h in (reader.fieldnames or [])}):
-                    messages.error(request, "CSV must have 'filename' and 'title' columns.")
+                csv_columns = {(name or "").strip() for name in (reader.fieldnames or [])}
+                if not required_columns.issubset(csv_columns):
+                    missing = ", ".join(sorted(required_columns - csv_columns))
+                    messages.error(request, f"CSV is missing required columns: {missing}.")
                     return HttpResponseRedirect(request.path)
 
                 zip_members = {n: n for n in real_names}
@@ -331,10 +341,13 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
                 queued_ids = []
                 for row in reader:
                     total += 1
-                    filename = (row.get("filename") or "").strip()
-                    title = (row.get("title") or "").strip()
+                    filename = (row.get(filename_col) or "").strip()
+                    title = (row.get(title_col) or "").strip()
                     if not filename or not title:
-                        messages.warning(request, f"Row {total}: missing filename or title; skipped.")
+                        messages.warning(
+                            request,
+                            f"Row {total}: missing {filename_col} or {title_col}; skipped.",
+                        )
                         continue
 
                     member = zip_members.get(filename) or zip_members.get(os.path.basename(filename))
@@ -385,5 +398,7 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
                 "opts": self.model._meta,
                 "title": "Upload zip of PDFs",
                 "changelist_url": changelist_url,
+                "required_columns": self.zip_csv_required_columns,
+                "required_columns_label": required_columns_label,
             },
         )
