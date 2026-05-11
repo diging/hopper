@@ -1,10 +1,14 @@
 import logging
+import threading
 
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.models import User
+from django.db import transaction
+
 from ask.models import Conversation, TermsAcceptance, QARecord, SimWorkflow, WebsiteResource, PDFResource
-from ask.kb_connector import add_website_to_kb, add_pdf_to_kb, delete_kb_document
+from ask.kb_connector import delete_kb_document
+from ask.tasks import run_kb_resource_upload
 
 logger = logging.getLogger(__name__)
 
@@ -179,9 +183,10 @@ class SimWorkflowAdmin(admin.ModelAdmin):
 
 @admin.register(WebsiteResource)
 class WebsiteResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
-    list_display = ("title", "url", "creator", "modified_at")
+    list_display = ("title", "url", "creator", "status", "modified_at")
+    list_filter = ("status",)
     search_fields = ("title", "url")
-    readonly_fields = ("created_at", "modified_at", "creator", "modifier", "mcp_kb_document_id")
+    readonly_fields = ("created_at", "modified_at", "creator", "modifier", "mcp_kb_document_id", "status", "status_message")
     help_texts = {
         "title": "A short name to identify this website resource.",
         "description": "Optional details about what this website covers.",
@@ -199,26 +204,32 @@ class WebsiteResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
         if not change:
             obj.creator = request.user
         obj.modifier = request.user
+        obj.status = WebsiteResource.Status.PROCESSING
+        obj.status_message = "Queued for Knowledge Base upload."
         super().save_model(request, obj, form, change)
 
-        # send the website URL to the MCP KB server
-        # errors are logged but don't block the save
-        # is still saved in the internal DB even if the KB is unreachable
-        try:
-            result = add_website_to_kb(obj.url)
-            obj.mcp_kb_document_id = result.get("doc_id")
-            obj.save(update_fields=["mcp_kb_document_id"])
-            self.message_user(request, f"Website '{obj.title}' sent to Knowledge Base (doc_id={obj.mcp_kb_document_id}).")
-        except Exception as e:
-            logger.exception("Failed to send website to KB: %s", obj.url)
-            self.message_user(request, f"Website saved but failed to send to Knowledge Base: {e}", level="warning")
+        # start MCP KB upload in a background thread AFTER the admin's
+        # transaction commits, so a slow MCP round trip wont time out the save
+        transaction.on_commit(
+            lambda: threading.Thread(
+                target=run_kb_resource_upload,
+                args=("website", obj.pk),
+                daemon=True,
+            ).start()
+        )
+        self.message_user(
+            request,
+            f"Website '{obj.title}' saved. Upload to Knowledge Base is running in the background — "
+            "refresh this page to see the final status.",
+        )
 
 
 @admin.register(PDFResource)
 class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
-    list_display = ("title", "file", "creator", "modified_at")
+    list_display = ("title", "file", "creator", "status", "modified_at")
+    list_filter = ("status",)
     search_fields = ("title",)
-    readonly_fields = ("created_at", "modified_at", "creator", "modifier", "mcp_kb_document_id")
+    readonly_fields = ("created_at", "modified_at", "creator", "modifier", "mcp_kb_document_id", "status", "status_message")
     help_texts = {
         "title": "A short name to identify this PDF resource.",
         "description": "Optional details about what this PDF covers.",
@@ -236,17 +247,19 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
         if not change:
             obj.creator = request.user
         obj.modifier = request.user
+        obj.status = PDFResource.Status.PROCESSING
+        obj.status_message = "Queued for Knowledge Base upload."
         super().save_model(request, obj, form, change)
 
-        try:
-            obj.file.open("rb")
-            file_bytes = obj.file.read()
-            obj.file.close()
-            result = add_pdf_to_kb(file_bytes, obj.file.name.split("/")[-1], obj.title)
-            obj.mcp_kb_document_id = result.get("doc_id")
-            obj.save(update_fields=["mcp_kb_document_id"])
-            self.message_user(request, f"PDF '{obj.title}' sent to Knowledge Base (doc_id={obj.mcp_kb_document_id}).")
-        except Exception as e:
-            logger.exception("Failed to send PDF to KB: %s", obj.file.name)
-            self.message_user(request, f"PDF saved but failed to send to Knowledge Base: {e}", level="warning")
-
+        transaction.on_commit(
+            lambda: threading.Thread(
+                target=run_kb_resource_upload,
+                args=("pdf", obj.pk),
+                daemon=True,
+            ).start()
+        )
+        self.message_user(
+            request,
+            f"PDF '{obj.title}' saved. Upload to Knowledge Base is running in the background — "
+            "refresh this page to see the final status.",
+        )
