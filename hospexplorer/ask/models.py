@@ -3,6 +3,36 @@ import uuid
 from django.conf import settings
 from django.db import models
 
+class DocumentType(models.Model):
+    name = models.CharField(max_length=255, unique=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class DocumentAuthorInstitution(models.Model):
+    name = models.CharField(max_length=255, unique=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class InstitutionType(models.Model):
+    name = models.CharField(max_length=255, unique=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
 # Abstract Model, fields are inherited by subclasses
 class Resource(models.Model):
     class Status(models.TextChoices):
@@ -10,6 +40,11 @@ class Resource(models.Model):
         SUCCESS = "success", "Success"
         ERROR = "error", "Error"
         WARNING = "warning", "Warning"
+
+    class DatePrecision(models.TextChoices):
+        YEAR = "year", "Year"
+        MONTH = "month", "Month"
+        DAY = "day", "Day"
 
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True, default="")
@@ -33,6 +68,35 @@ class Resource(models.Model):
         default=Status.SUCCESS,
     )
     status_message = models.TextField(blank=True, default="")
+
+    date_published = models.DateField(null=True, blank=True)
+    date_published_precision = models.CharField(
+        max_length=10,
+        choices=DatePrecision.choices,
+        blank=True,
+        default="",
+    )
+    document_type = models.ForeignKey(
+        "DocumentType",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="%(class)s_resources",
+    )
+    document_author_institution = models.ForeignKey(
+        "DocumentAuthorInstitution",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="%(class)s_resources",
+    )
+    institution_type = models.ForeignKey(
+        "InstitutionType",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="%(class)s_resources",
+    )
 
     class Meta:
         abstract = True

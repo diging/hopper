@@ -6,7 +6,17 @@ from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.models import User
 from django.db import transaction
 
-from ask.models import Conversation, TermsAcceptance, QARecord, SimWorkflow, WebsiteResource, PDFResource
+from ask.models import (
+    Conversation,
+    TermsAcceptance,
+    QARecord,
+    SimWorkflow,
+    WebsiteResource,
+    PDFResource,
+    DocumentType,
+    DocumentAuthorInstitution,
+    InstitutionType,
+)
 from ask.kb_connector import delete_kb_document
 from ask.tasks import run_kb_resource_upload
 
@@ -181,16 +191,46 @@ class SimWorkflowAdmin(admin.ModelAdmin):
                 return
 
 
+@admin.register(DocumentType)
+class DocumentTypeAdmin(admin.ModelAdmin):
+    list_display = ("name",)
+    search_fields = ("name",)
+
+
+@admin.register(DocumentAuthorInstitution)
+class DocumentAuthorInstitutionAdmin(admin.ModelAdmin):
+    list_display = ("name",)
+    search_fields = ("name",)
+
+
+@admin.register(InstitutionType)
+class InstitutionTypeAdmin(admin.ModelAdmin):
+    list_display = ("name",)
+    search_fields = ("name",)
+
+
 @admin.register(WebsiteResource)
 class WebsiteResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
     list_display = ("title", "url", "creator", "status", "modified_at")
     list_filter = ("status",)
     search_fields = ("title", "url")
     readonly_fields = ("created_at", "modified_at", "creator", "modifier", "mcp_kb_document_id", "status", "status_message")
+    fieldsets = (
+        (None, {"fields": ("title", "description", "url")}),
+        ("Metadata", {"fields": (
+            "date_published", "date_published_precision",
+            "document_type", "document_author_institution", "institution_type",
+        )}),
+        ("Status", {"fields": (
+            "status", "status_message", "mcp_kb_document_id",
+            "created_at", "modified_at", "creator", "modifier",
+        )}),
+    )
     help_texts = {
         "title": "A short name to identify this website resource.",
         "description": "Optional details about what this website covers.",
         "url": "The URL the LLM will use as context when answering questions.",
+        "date_published_precision": "Granularity of the date above (year / month / day). Leave blank if unknown.",
     }
 
     def get_form(self, request, obj=None, **kwargs):
@@ -230,10 +270,22 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
     list_filter = ("status",)
     search_fields = ("title",)
     readonly_fields = ("created_at", "modified_at", "creator", "modifier", "mcp_kb_document_id", "status", "status_message")
+    fieldsets = (
+        (None, {"fields": ("title", "description", "file")}),
+        ("Metadata", {"fields": (
+            "date_published", "date_published_precision",
+            "document_type", "document_author_institution", "institution_type",
+        )}),
+        ("Status", {"fields": (
+            "status", "status_message", "mcp_kb_document_id",
+            "created_at", "modified_at", "creator", "modifier",
+        )}),
+    )
     help_texts = {
         "title": "A short name to identify this PDF resource.",
         "description": "Optional details about what this PDF covers.",
         "file": "The PDF file the LLM will use as context when answering questions.",
+        "date_published_precision": "Granularity of the date above (year / month / day). Leave blank if unknown.",
     }
 
     def get_form(self, request, obj=None, **kwargs):
