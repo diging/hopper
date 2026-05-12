@@ -246,8 +246,8 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
         "file": "The PDF file the LLM will use as context when answering questions.",
     }
 
-    # Column names the bulk-import CSV must define (first = zip member, second = resource title).
-    # Defaults come from settings.PDF_ZIP_CSV_COLUMNS (env-driven); override on a subclass if needed.
+    # Column names the bulk-import CSV must define (first = zip member, second = resource title)
+    # Defaults come from settings.PDF_ZIP_CSV_COLUMNS (override on a subclass if needed)
     @property
     def zip_csv_required_columns(self):
         cols = tuple(settings.PDF_ZIP_CSV_COLUMNS)
