@@ -1,3 +1,4 @@
+import json
 import logging
 
 import httpx
@@ -30,15 +31,16 @@ def list_kb_documents(page=1, page_size=10):
     return response.json()
 
 
-def add_website_to_kb(url):
+def add_website_to_kb(url, metadata=None):
     """Send a website URL to the MCP KB server for ingestion.
 
     Calls POST /docs/website/add?url={url} on the MCP KB server.
-    The KB server fetches the page, chunks it, generates embeddings,
-    and stores it for semantic search.
+    ``metadata`` (if provided) is sent as a JSON body ``{"metadata": ...}`` so
+    the KB server can store it on the Document row.
     """
     headers = {
         "Authorization": f"Bearer {settings.KB_MCP_JWT_TOKEN}",
+        "Content-Type": "application/json",
     }
     endpoint = f"{settings.KB_MCP_HOST}/docs/website/add"
 
@@ -46,6 +48,7 @@ def add_website_to_kb(url):
         response = client.post(
             endpoint,
             params={"url": url},
+            json={"metadata": metadata} if metadata is not None else {},
             headers=headers,
             timeout=settings.KB_MCP_TIMEOUT,
         )
@@ -54,12 +57,12 @@ def add_website_to_kb(url):
     return response.json()
 
 
-def add_pdf_to_kb(file_bytes, filename, title, url=None):
+def add_pdf_to_kb(file_bytes, filename, title, url=None, metadata=None):
     """Upload a PDF to the MCP KB server for ingestion.
 
     Calls POST /docs/pdf/add on the MCP KB server with multipart form data.
-    The KB server extracts text, chunks it, generates embeddings,
-    and stores it for semantic search.
+    metadata (if provided) is JSON-encoded into a metadata form field so
+    it can travel alongside the file.
     """
     headers = {
         "Authorization": f"Bearer {settings.KB_MCP_JWT_TOKEN}",
@@ -70,6 +73,8 @@ def add_pdf_to_kb(file_bytes, filename, title, url=None):
     data = {"title": title}
     if url:
         data["url"] = url
+    if metadata is not None:
+        data["metadata"] = json.dumps(metadata)
 
     with httpx.Client() as client:
         response = client.post(

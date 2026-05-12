@@ -5,6 +5,9 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.models import User
 from django.db import transaction
+from django.http import HttpResponseRedirect
+from django.shortcuts import render
+from django.urls import path, reverse
 
 from ask.models import (
     Conversation,
@@ -17,6 +20,7 @@ from ask.models import (
     DocumentAuthorInstitution,
     InstitutionType,
 )
+from ask.admin_csv import import_names_csv
 from ask.kb_connector import delete_kb_document
 from ask.tasks import run_kb_resource_upload
 
@@ -191,20 +195,72 @@ class SimWorkflowAdmin(admin.ModelAdmin):
                 return
 
 
+class LookupCSVImportMixin:
+    """Adds an Import CSV button + upload view to a lookup ModelAdmin.
+
+    CSV is single-column name. Duplicates are skipped, header row optional.
+    """
+
+    change_list_template = "admin/ask/lookup_change_list.html"
+
+    def get_urls(self):
+        urls = super().get_urls()
+        info = (self.model._meta.app_label, self.model._meta.model_name)
+        return [
+            path(
+                "import-csv/",
+                self.admin_site.admin_view(self.import_csv_view),
+                name=f"{info[0]}_{info[1]}_import_csv",
+            ),
+        ] + urls
+
+    def import_csv_view(self, request):
+        info = (self.model._meta.app_label, self.model._meta.model_name)
+        changelist_url = reverse(f"admin:{info[0]}_{info[1]}_changelist")
+
+        if request.method == "POST":
+            file_obj = request.FILES.get("csv_file")
+            if file_obj is None:
+                self.message_user(request, "No file provided.", level="error")
+            elif not file_obj.name.lower().endswith(".csv"):
+                self.message_user(request, "File must have a .csv extension.", level="error")
+            else:
+                try:
+                    created, skipped = import_names_csv(self.model, file_obj)
+                except Exception as e:
+                    logger.exception("CSV import failed for %s", self.model.__name__)
+                    self.message_user(request, f"Import failed: {e}", level="error")
+                else:
+                    self.message_user(
+                        request,
+                        f"Imported {created} new {self.model._meta.verbose_name_plural} "
+                        f"(skipped {skipped} duplicate or empty rows).",
+                    )
+            return HttpResponseRedirect(changelist_url)
+
+        context = {
+            **self.admin_site.each_context(request),
+            "title": f"Import {self.model._meta.verbose_name_plural} from CSV",
+            "opts": self.model._meta,
+            "changelist_url": changelist_url,
+        }
+        return render(request, "admin/ask/lookup_csv_import.html", context)
+
+
 @admin.register(DocumentType)
-class DocumentTypeAdmin(admin.ModelAdmin):
+class DocumentTypeAdmin(LookupCSVImportMixin, admin.ModelAdmin):
     list_display = ("name",)
     search_fields = ("name",)
 
 
 @admin.register(DocumentAuthorInstitution)
-class DocumentAuthorInstitutionAdmin(admin.ModelAdmin):
+class DocumentAuthorInstitutionAdmin(LookupCSVImportMixin, admin.ModelAdmin):
     list_display = ("name",)
     search_fields = ("name",)
 
 
 @admin.register(InstitutionType)
-class InstitutionTypeAdmin(admin.ModelAdmin):
+class InstitutionTypeAdmin(LookupCSVImportMixin, admin.ModelAdmin):
     list_display = ("name",)
     search_fields = ("name",)
 

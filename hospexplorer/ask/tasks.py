@@ -144,6 +144,23 @@ def run_llm_task(task_id, record_id, conversation_id):
         close_old_connections()
 
 
+def _build_resource_metadata(obj):
+    """Serialize a Resource's metadata fields into a JSON-safe dict.
+
+    FK lookups are flattened to their ``name`` so the MCP payload is
+    self-describing and doesn't depend on hosp-explorer's local IDs.
+    """
+    return {
+        "date_published": obj.date_published.isoformat() if obj.date_published else None,
+        "date_published_precision": obj.date_published_precision or None,
+        "document_type": obj.document_type.name if obj.document_type_id else None,
+        "document_author_institution": (
+            obj.document_author_institution.name if obj.document_author_institution_id else None
+        ),
+        "institution_type": obj.institution_type.name if obj.institution_type_id else None,
+    }
+
+
 def run_kb_resource_upload(model_label, resource_id):
     """Background thread: push a resource to the MCP KB and record its doc_id.
 
@@ -169,15 +186,18 @@ def run_kb_resource_upload(model_label, resource_id):
         return
 
     try:
+        metadata = _build_resource_metadata(obj)
         if model_label == "pdf":
             obj.file.open("rb")
             try:
                 file_bytes = obj.file.read()
             finally:
                 obj.file.close()
-            result = add_pdf_to_kb(file_bytes, obj.file.name.split("/")[-1], obj.title)
+            result = add_pdf_to_kb(
+                file_bytes, obj.file.name.split("/")[-1], obj.title, metadata=metadata,
+            )
         else:
-            result = add_website_to_kb(obj.url)
+            result = add_website_to_kb(obj.url, metadata=metadata)
 
         obj.mcp_kb_document_id = result.get("doc_id")
         obj.status = Resource.Status.SUCCESS
