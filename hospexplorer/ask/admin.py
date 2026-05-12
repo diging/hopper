@@ -5,6 +5,8 @@ import os
 import threading
 import zipfile
 
+from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.contrib import admin, messages
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.models import User
@@ -244,8 +246,17 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
         "file": "The PDF file the LLM will use as context when answering questions.",
     }
 
-    # column names the bulk-import CSV must define (first = zip member, second = resource title)
-    zip_csv_required_columns = ("filename", "title")
+    # Column names the bulk-import CSV must define (first = zip member, second = resource title).
+    # Defaults come from settings.PDF_ZIP_CSV_COLUMNS (env-driven); override on a subclass if needed.
+    @property
+    def zip_csv_required_columns(self):
+        cols = tuple(settings.PDF_ZIP_CSV_COLUMNS)
+        if len(cols) < 2:
+            raise ImproperlyConfigured(
+                "PDF_ZIP_CSV_COLUMNS must list at least two column names "
+                "(filename column first, title column second)."
+            )
+        return cols[:2]
 
     def get_form(self, request, obj=None, **kwargs):
         form = super().get_form(request, obj, **kwargs)
