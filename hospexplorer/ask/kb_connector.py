@@ -71,6 +71,9 @@ def add_pdf_to_kb(file_bytes, filename, title, url=None):
     if url:
         data["url"] = url
 
+    # Only retry on transport errors (the request never completed) — a timeout
+    # likely means the KB received the file and is still processing it, so
+    # retrying would create a duplicate rather than help.
     attempts = max(1, settings.KB_MCP_PDF_RETRIES)
     last_exc = None
     for attempt in range(1, attempts + 1):
@@ -87,7 +90,7 @@ def add_pdf_to_kb(file_bytes, filename, title, url=None):
                 )
             response.raise_for_status()
             return response.json()
-        except (httpx.TimeoutException, httpx.TransportError) as e:
+        except httpx.TransportError as e:
             last_exc = e
             if attempt == attempts:
                 break
