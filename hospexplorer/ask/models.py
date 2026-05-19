@@ -1,7 +1,10 @@
+import logging
 import uuid
 
 from django.conf import settings
 from django.db import models
+
+logger = logging.getLogger(__name__)
 
 # Abstract Model, fields are inherited by subclasses
 class Resource(models.Model):
@@ -57,6 +60,18 @@ class PDFResource(Resource):
     class Meta:
         verbose_name = "PDF Resource"
         verbose_name_plural = "PDF Resources"
+
+    def delete(self, *args, **kwargs):
+        # Django leaves a FileField's file on disk when its row is deleted;
+        # remove it explicitly so deleted PDFs don't pile up in MEDIA
+        pk, file = self.pk, self.file
+        result = super().delete(*args, **kwargs)
+        if file:
+            try:
+                file.delete(save=False)
+            except Exception:
+                logger.exception("Failed to remove media file for deleted PDFResource pk=%s", pk)
+        return result
 
 
 class QueryTask(models.Model):
