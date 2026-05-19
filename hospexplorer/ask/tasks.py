@@ -198,7 +198,7 @@ def run_kb_resource_upload(model_label, resource_id):
     except Exception as e:
         logger.exception("Background KB %s upload failed for resource_id=%s", model_label, resource_id)
         # file never reached the KB, so leaving it in MEDIA_ROOT would just be orphaned
-        # bytes — drop it. The row stays with ERROR status so the failure stays visible.
+        # bytes. The row stays with ERROR status so the failure stays visible.
         file_cleared = False
         if model_label == "pdf" and obj.file:
             try:
