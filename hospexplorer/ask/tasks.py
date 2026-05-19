@@ -184,12 +184,15 @@ def run_kb_resource_upload(model_label, resource_id):
         obj.status_message = f"Uploaded to Knowledge Base (doc_id={obj.mcp_kb_document_id})."
         obj.save(update_fields=["mcp_kb_document_id", "status", "status_message"])
     except httpx.TimeoutException:
+        # A timeout here almost always means the KB received the file and is
+        # still processing it. Surface as WARNING — not ERROR — and tell
+        # the user not to retry, since a retry would just duplicate the upload.
         logger.exception("Background KB %s upload timed out for resource_id=%s", model_label, resource_id)
-        obj.status = Resource.Status.ERROR
+        obj.status = Resource.Status.WARNING
         obj.status_message = (
-            f"Upload timed out after {settings.KB_MCP_TIMEOUT}s. "
-            "The Knowledge Base did not finish processing this file in time — "
-            "it may be too large. Edit the resource and save again to retry."
+            "Still processing in the Knowledge Base. Large files can take a few minutes. "
+            "Do not re-upload — it would create a duplicate. "
+            "Refresh this page in a few minutes to confirm it appears in the documents list."
         )
         obj.save(update_fields=["status", "status_message"])
     except Exception as e:

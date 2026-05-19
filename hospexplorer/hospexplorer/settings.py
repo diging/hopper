@@ -170,6 +170,35 @@ LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "4096"))
 KB_MCP_HOST = os.getenv("KB_MCP_HOST", "http://localhost:8002")
 KB_MCP_JWT_TOKEN = os.getenv("KB_MCP_JWT_TOKEN", "")
 KB_MCP_TIMEOUT = int(os.getenv("KB_MCP_TIMEOUT", 30))
+KB_MCP_PDF_TIMEOUT = int(os.getenv("KB_MCP_PDF_TIMEOUT", 300)) # Timeout is in seconds 300 seconds (5 minutes)
+# Number of retries for the PDF upload, used in add_pdf_to_kb function in kb_connector.py
+KB_MCP_PDF_RETRIES = int(os.getenv("KB_MCP_PDF_RETRIES", 2))
+
+# Header names the PDF zip upload view expects in the metadata CSV inside the zip file
+# Comma separated, ORDER MATTERS: 
+# first = column holding the PDF filename in the zip file,
+# second = column holding the PDFResource title
+#
+# Default ("filename,title") means the CSV file must look like:
+#     filename,title
+#     example.pdf, Example Document
+#     test.pdf,Test Document
+#
+# Set PDF_ZIP_CSV_COLUMNS=archive,number and the same view now expects:
+#     archive,number
+#     example.pdf, Example Document
+#     test.pdf,Test Document
+#
+# Setting PDF_ZIP_CSV_COLUMNS= (empty) or tto a single column is NOT suppored:
+# the upload view requires both a filename column and a title column, so
+# PDFResourceAdmin will raise ImproperlyConfigured at request time.
+#
+# Extra CSV columns beyond these two are ignored. Changing this does not change
+# which PDFResource fields get populated, only title is read
+
+PDF_ZIP_CSV_COLUMNS = tuple(
+    column.strip() for column in os.getenv("PDF_ZIP_CSV_COLUMNS", "filename,title").split(",") if column.strip()
+)
 
 # Number of resources to fetch per page
 KB_RESOURCES_PAGE_SIZE = int(os.getenv("KB_RESOURCES_PAGE_SIZE", 20))

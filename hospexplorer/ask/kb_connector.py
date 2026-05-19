@@ -1,4 +1,5 @@
 import logging
+import time
 
 import httpx
 from django.conf import settings
@@ -66,22 +67,41 @@ def add_pdf_to_kb(file_bytes, filename, title, url=None):
     }
     endpoint = f"{settings.KB_MCP_HOST}/docs/pdf/add"
 
-    files = {"file": (filename, file_bytes, "application/pdf")}
     data = {"title": title}
     if url:
         data["url"] = url
 
-    with httpx.Client() as client:
-        response = client.post(
-            endpoint,
-            headers=headers,
-            files=files,
-            data=data,
-            timeout=settings.KB_MCP_TIMEOUT,
-        )
+    # Only retry on transport errors (the request never completed) — a timeout
+    # likely means the KB received the file and is still processing it, so
+    # retrying would create a duplicate rather than help.
+    attempts = max(1, settings.KB_MCP_PDF_RETRIES)
+    last_exc = None
+    for attempt in range(1, attempts + 1):
+        # rebuild files each attempt: httpx consumes the stream on send
+        files = {"file": (filename, file_bytes, "application/pdf")}
+        try:
+            with httpx.Client() as client:
+                response = client.post(
+                    endpoint,
+                    headers=headers,
+                    files=files,
+                    data=data,
+                    timeout=settings.KB_MCP_PDF_TIMEOUT,
+                )
+            response.raise_for_status()
+            return response.json()
+        except httpx.TransportError as e:
+            last_exc = e
+            if attempt == attempts:
+                break
+            backoff = 2 ** (attempt - 1)
+            logger.warning(
+                "KB PDF push failed (attempt %d/%d) for %s: %s; retrying in %ds",
+                attempt, attempts, filename, e, backoff,
+            )
+            time.sleep(backoff)
 
-    response.raise_for_status()
-    return response.json()
+    raise last_exc
 
 
 def delete_kb_document(doc_id):
