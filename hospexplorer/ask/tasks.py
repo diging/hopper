@@ -197,8 +197,18 @@ def run_kb_resource_upload(model_label, resource_id):
         obj.save(update_fields=["status", "status_message"])
     except Exception as e:
         logger.exception("Background KB %s upload failed for resource_id=%s", model_label, resource_id)
+        # file never reached the KB, so leaving it in MEDIA_ROOT would just be orphaned
+        # bytes — drop it. The row stays with ERROR status so the failure stays visible.
+        file_cleared = False
+        if model_label == "pdf" and obj.file:
+            try:
+                obj.file.delete(save=False)
+                file_cleared = True
+            except Exception:
+                logger.exception("Failed to remove media file for resource_id=%s", resource_id)
         obj.status = Resource.Status.ERROR
         obj.status_message = f"Upload to Knowledge Base failed: {e}"[:1000]
-        obj.save(update_fields=["status", "status_message"])
+        update_fields = ["status", "status_message"] + (["file"] if file_cleared else [])
+        obj.save(update_fields=update_fields)
     finally:
         close_old_connections()
