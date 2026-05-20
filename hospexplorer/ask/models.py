@@ -52,6 +52,9 @@ class WebsiteResource(Resource):
 
 class PDFResource(Resource):
     file = models.FileField(upload_to="kb_pdfs/")
+    # Original uploaded filename, kept verbatim — file.name carries a storage-added
+    # suffix on collision, so it can't be used to detect re-uploads of the same file.
+    original_filename = models.CharField(max_length=255, blank=True, default="")
     mcp_kb_document_id = models.IntegerField(null=True, blank=True, help_text="Document ID returned by the MCP Knowledge Base.")
 
     class Meta:
