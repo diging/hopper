@@ -62,14 +62,19 @@ class PDFResource(Resource):
         verbose_name_plural = "PDF Resources"
 
     def delete(self, *args, **kwargs):
-        # Django leaves a FileField's file on disk when its row is deleted;
-        # remove it explicitly so deleted PDFs don't pile up in MEDIA
+        # overridden at the model level so the file is
+        # cleaned up on every delete path, not just admin actions. Django
+        # otherwise leaves a FileField's file on disk when its row is deleted.
         pk, file = self.pk, self.file
         result = super().delete(*args, **kwargs)
+        # KBDeleteAdminMixin reads this to warn the user if a file left behind
+        # may still expose sensitive PDF content they assume has been deleted
+        self.file_deletion_failed = False
         if file:
             try:
                 file.delete(save=False)
             except Exception:
+                self.file_deletion_failed = True
                 logger.exception("Failed to remove media file for deleted PDFResource pk=%s", pk)
         return result
 
