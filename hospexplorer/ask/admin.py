@@ -271,9 +271,12 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
         obj.modifier = request.user
         obj.status = PDFResource.Status.PROCESSING
         obj.status_message = "Queued for Knowledge Base upload."
-        # capture the original name before storage save() mangles it on collision
+        
+        # record the original name so the zip upload's duplicate check sees PDFs
+        # added through this form too; do it before save() mangles file.name on collision
         if not change or "file" in form.changed_data:
             obj.original_filename = os.path.basename(obj.file.name)
+        
         super().save_model(request, obj, form, change)
 
         transaction.on_commit(
@@ -350,7 +353,7 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
                 for n in real_names:
                     zip_members.setdefault(os.path.basename(n), n)
 
-                # a PDF "already exists" when both its original filename and
+                # a PDF already exists when both its original filename and
                 # title match a row already imported
                 existing_pdfs = set(
                     PDFResource.objects.values_list("original_filename", "title")
