@@ -12,9 +12,18 @@
 {% block content %}
 <h1>{{ title }}</h1>
 <p>
-    Upload a <code>.zip</code> containing PDF files and a single CSV metadata file
-    with columns <code>{{ required_columns_label }}</code>. Each row creates a PDF Resource
-    and pushes the file to the Knowledge Base.
+    Upload a <code>.zip</code> containing PDF files and a single CSV metadata file.
+    Each row creates a PDF Resource and pushes the file to the Knowledge Base.
+</p>
+<p>
+    Required CSV columns: <code>{{ required_columns_label }}</code>.
+</p>
+<p>
+    Optional metadata columns (per row, leave blank if unknown):
+    <code>date_published</code> &mdash; a year, <code>YYYY-MM</code>, or
+    <code>YYYY-MM-DD</code>; <code>document_type</code>,
+    <code>document_author_institution</code>, <code>institution_type</code>
+    &mdash; controlled-list values, created automatically as rows are imported.
 </p>
 <form method="post" enctype="multipart/form-data">
     {% csrf_token %}

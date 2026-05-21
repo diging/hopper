@@ -27,7 +27,7 @@ from ask.models import (
     DocumentAuthorInstitution,
     InstitutionType,
 )
-from ask.admin_csv import import_names_csv
+from ask.admin_csv import import_names_csv, parse_partial_date
 from ask.kb_connector import delete_kb_document
 from ask.tasks import run_kb_resource_upload
 
@@ -341,6 +341,50 @@ class WebsiteResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
         )
 
 
+# Optional metadata columns the zip-CSV importer reads onto each PDFResource.
+# Controlled-list values create the matching lookup row the first time they
+# appear, so the available options grow from what the imports actually use.
+ZIP_CSV_LOOKUP_COLUMNS = {
+    "document_type": DocumentType,
+    "document_author_institution": DocumentAuthorInstitution,
+    "institution_type": InstitutionType,
+}
+
+
+def _apply_zip_csv_metadata(obj, row):
+    """Populate a resource's metadata fields from one zip-CSV row.
+
+    Every metadata column is optional. Returns a list of human-readable
+    warnings for values that could not be applied — the row is still imported,
+    just with that field left blank.
+    """
+    warnings = []
+
+    date_raw = (row.get("date_published") or "").strip()
+    if date_raw:
+        parsed_date, precision = parse_partial_date(date_raw)
+        if parsed_date:
+            obj.date_published = parsed_date
+            obj.date_published_precision = precision
+        else:
+            warnings.append(
+                f"invalid date_published '{date_raw}' "
+                "(use YYYY, YYYY-MM or YYYY-MM-DD); left blank"
+            )
+
+    for column, model in ZIP_CSV_LOOKUP_COLUMNS.items():
+        value = (row.get(column) or "").strip()
+        if not value:
+            continue
+        if len(value) > 255:
+            warnings.append(f"{column} value exceeds 255 characters; left blank")
+            continue
+        lookup, _ = model.objects.get_or_create(name=value)
+        setattr(obj, column, lookup)
+
+    return warnings
+
+
 @admin.register(PDFResource)
 class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
     list_display = ("title", "file", "creator", "status", "modified_at")
@@ -498,6 +542,8 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
                         status=PDFResource.Status.PROCESSING,
                         status_message="Queued for Knowledge Base upload.",
                     )
+                    for warning in _apply_zip_csv_metadata(obj, row):
+                        messages.warning(request, f"Row {total}: {warning}")
                     obj.file.save(os.path.basename(filename), ContentFile(pdf_bytes), save=True)
                     saved += 1
                     queued_ids.append(obj.pk)

@@ -193,8 +193,10 @@ KB_MCP_PDF_RETRIES = int(os.getenv("KB_MCP_PDF_RETRIES", 2))
 # the upload view requires both a filename column and a title column, so
 # PDFResourceAdmin will raise ImproperlyConfigured at request time.
 #
-# Extra CSV columns beyond these two are ignored. Changing this does not change
-# which PDFResource fields get populated, only title is read
+# Only the filename and title columns are configurable here. The importer also
+# reads optional, fixed-name metadata columns when present: date_published,
+# document_type, document_author_institution, institution_type. Any other
+# columns are ignored.
 
 PDF_ZIP_CSV_COLUMNS = tuple(
     column.strip() for column in os.getenv("PDF_ZIP_CSV_COLUMNS", "filename,title").split(",") if column.strip()
