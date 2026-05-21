@@ -45,16 +45,30 @@ class KBDeleteAdminMixin:
         self.message_user(request, f"Removed '{obj.title}' from Knowledge Base.")
         return True
 
+    def _warn_if_file_remains(self, request, obj):
+        # PDFResource.delete() sets this flag when its media file could not be
+        # removed, the error below is reported to the user
+        if getattr(obj, "file_deletion_failed", False):
+            self.message_user(
+                request,
+                f"'{obj.title}' was deleted, but its file could not be removed from "
+                "the server. The file may still be accessible and contain sensitive "
+                "data. Please delete it manually.",
+                level="error",
+            )
+
     def delete_model(self, request, obj):
         if not self._delete_kb_document(request, obj):
             return
         super().delete_model(request, obj)
+        self._warn_if_file_remains(request, obj)
 
     def delete_queryset(self, request, queryset):
         for obj in queryset:
             if not self._delete_kb_document(request, obj):
                 continue
             obj.delete()
+            self._warn_if_file_remains(request, obj)
 
 
 class QARecordInline(admin.TabularInline):
