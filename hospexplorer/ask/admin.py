@@ -1,9 +1,16 @@
+import csv
+import io
 import logging
+import os
 import threading
+import zipfile
 
-from django.contrib import admin
+from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
+from django.contrib import admin, messages
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.models import User
+from django.core.files.base import ContentFile
 from django.db import transaction
 from django.http import HttpResponseRedirect
 from django.shortcuts import render
@@ -49,16 +56,30 @@ class KBDeleteAdminMixin:
         self.message_user(request, f"Removed '{obj.title}' from Knowledge Base.")
         return True
 
+    def _warn_if_file_remains(self, request, obj):
+        # PDFResource.delete() sets this flag when its media file could not be
+        # removed, the error below is reported to the user
+        if getattr(obj, "file_deletion_failed", False):
+            self.message_user(
+                request,
+                f"'{obj.title}' was deleted, but its file could not be removed from "
+                "the server. The file may still be accessible and contain sensitive "
+                "data. Please delete it manually.",
+                level="error",
+            )
+
     def delete_model(self, request, obj):
         if not self._delete_kb_document(request, obj):
             return
         super().delete_model(request, obj)
+        self._warn_if_file_remains(request, obj)
 
     def delete_queryset(self, request, queryset):
         for obj in queryset:
             if not self._delete_kb_document(request, obj):
                 continue
             obj.delete()
+            self._warn_if_file_remains(request, obj)
 
 
 class QARecordInline(admin.TabularInline):
@@ -344,6 +365,18 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
         "date_published_precision": "Granularity of the date above (year / month / day). Leave blank if unknown.",
     }
 
+    # Column names the bulk-import CSV must define (first = zip member, second = resource title)
+    # Defaults come from settings.PDF_ZIP_CSV_COLUMNS (override on a subclass if needed)
+    @property
+    def zip_csv_required_columns(self):
+        cols = tuple(settings.PDF_ZIP_CSV_COLUMNS)
+        if len(cols) < 2:
+            raise ImproperlyConfigured(
+                "PDF_ZIP_CSV_COLUMNS must list at least two column names "
+                "(filename column first, title column second)."
+            )
+        return cols[:2]
+
     def get_form(self, request, obj=None, **kwargs):
         form = super().get_form(request, obj, **kwargs)
         for field_name, text in self.help_texts.items():
@@ -370,4 +403,132 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
             request,
             f"PDF '{obj.title}' saved. Upload to Knowledge Base is running in the background — "
             "refresh this page to see the final status.",
+        )
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path(
+                "upload-zip/",
+                self.admin_site.admin_view(self.zip_upload_view),
+                name="ask_pdfresource_upload_zip",
+            ),
+        ]
+        return custom + urls
+
+    def zip_upload_view(self, request):
+        changelist_url = reverse("admin:ask_pdfresource_changelist")
+        filename_col, title_col = self.zip_csv_required_columns
+        required_columns = set(self.zip_csv_required_columns)
+        required_columns_label = ", ".join(self.zip_csv_required_columns)
+
+        if request.method == "POST":
+            zip_file = request.FILES.get("zip_file")
+            if not zip_file:
+                messages.error(request, "Please select a zip file to upload.")
+                return HttpResponseRedirect(request.path)
+
+            try:
+                archive = zipfile.ZipFile(zip_file)
+            except zipfile.BadZipFile:
+                messages.error(request, "The uploaded file is not a valid zip archive.")
+                return HttpResponseRedirect(request.path)
+
+            with archive:
+                # skip macOS Finder metadata: __MACOSX/ dir and AppleDouble "._" twins
+                def _is_real(name):
+                    base = os.path.basename(name)
+                    return not name.startswith("__MACOSX/") and not base.startswith("._") and base != ""
+
+                real_names = [n for n in archive.namelist() if _is_real(n)]
+
+                csv_names = [n for n in real_names if n.lower().endswith(".csv")]
+                if len(csv_names) == 0:
+                    messages.error(
+                        request,
+                        f"Zip must contain one CSV metadata file ({required_columns_label}).",
+                    )
+                    return HttpResponseRedirect(request.path)
+                if len(csv_names) > 1:
+                    messages.error(request, f"Zip must contain exactly one CSV; found {len(csv_names)}.")
+                    return HttpResponseRedirect(request.path)
+
+                csv_text = archive.read(csv_names[0]).decode("utf-8-sig")
+                reader = csv.DictReader(io.StringIO(csv_text))
+                csv_columns = {(name or "").strip() for name in (reader.fieldnames or [])}
+                if not required_columns.issubset(csv_columns):
+                    missing = ", ".join(sorted(required_columns - csv_columns))
+                    messages.error(request, f"CSV is missing required columns: {missing}.")
+                    return HttpResponseRedirect(request.path)
+
+                zip_members = {n: n for n in real_names}
+                # also index by basename so CSV can refer to bare filenames regardless of zip layout
+                for n in real_names:
+                    zip_members.setdefault(os.path.basename(n), n)
+
+                total = 0
+                saved = 0
+                queued_ids = []
+                for row in reader:
+                    total += 1
+                    filename = (row.get(filename_col) or "").strip()
+                    title = (row.get(title_col) or "").strip()
+                    if not filename or not title:
+                        messages.warning(
+                            request,
+                            f"Row {total}: missing {filename_col} or {title_col}; skipped.",
+                        )
+                        continue
+
+                    member = zip_members.get(filename) or zip_members.get(os.path.basename(filename))
+                    if not member:
+                        messages.warning(request, f"Row {total}: '{filename}' not in zip; skipped.")
+                        continue
+
+                    try:
+                        pdf_bytes = archive.read(member)
+                    except KeyError:
+                        messages.warning(request, f"Row {total}: could not read '{filename}'; skipped.")
+                        continue
+
+                    obj = PDFResource(
+                        title=title,
+                        creator=request.user,
+                        modifier=request.user,
+                        status=PDFResource.Status.PROCESSING,
+                        status_message="Queued for Knowledge Base upload.",
+                    )
+                    obj.file.save(os.path.basename(filename), ContentFile(pdf_bytes), save=True)
+                    saved += 1
+                    queued_ids.append(obj.pk)
+
+                # fire KB uploads after the request transaction commits so background
+                # threads see the just-saved rows
+                def _start_uploads(ids=tuple(queued_ids)):
+                    for pk in ids:
+                        threading.Thread(
+                            target=run_kb_resource_upload,
+                            args=("pdf", pk),
+                            daemon=True,
+                        ).start()
+                transaction.on_commit(_start_uploads)
+
+                messages.success(
+                    request,
+                    f"Imported {saved} of {total} PDFs. Knowledge Base uploads are running in the "
+                    "background — refresh the list to see each row's final status.",
+                )
+                return HttpResponseRedirect(changelist_url)
+
+        return render(
+            request,
+            "admin/ask/pdfresource/upload_zip.html",
+            {
+                **self.admin_site.each_context(request),
+                "opts": self.model._meta,
+                "title": "Upload zip of PDFs",
+                "changelist_url": changelist_url,
+                "required_columns": self.zip_csv_required_columns,
+                "required_columns_label": required_columns_label,
+            },
         )

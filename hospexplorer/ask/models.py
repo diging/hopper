@@ -1,7 +1,10 @@
+import logging
 import uuid
 
 from django.conf import settings
 from django.db import models
+
+logger = logging.getLogger(__name__)
 
 class DocumentType(models.Model):
     name = models.CharField(max_length=255, unique=True)
@@ -31,7 +34,6 @@ class InstitutionType(models.Model):
 
     def __str__(self):
         return self.name
-
 
 # Abstract Model, fields are inherited by subclasses
 class Resource(models.Model):
@@ -121,6 +123,23 @@ class PDFResource(Resource):
     class Meta:
         verbose_name = "PDF Resource"
         verbose_name_plural = "PDF Resources"
+
+    def delete(self, *args, **kwargs):
+        # overridden at the model level so the file is
+        # cleaned up on every delete path, not just admin actions. Django
+        # otherwise leaves a FileField's file on disk when its row is deleted.
+        pk, file = self.pk, self.file
+        result = super().delete(*args, **kwargs)
+        # KBDeleteAdminMixin reads this to warn the user if a file left behind
+        # may still expose sensitive PDF content they assume has been deleted
+        self.file_deletion_failed = False
+        if file:
+            try:
+                file.delete(save=False)
+            except Exception:
+                self.file_deletion_failed = True
+                logger.exception("Failed to remove media file for deleted PDFResource pk=%s", pk)
+        return result
 
 
 class QueryTask(models.Model):
