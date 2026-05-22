@@ -184,3 +184,20 @@ class ZipUploadViewTests(TestCase):
         pdf = PDFResource.objects.get(title="Plain Report")
         self.assertIsNone(pdf.date_published)
         self.assertIsNone(pdf.document_type_id)
+
+    def test_zip_import_tolerates_whitespace_in_csv_header(self):
+        # spaces after commas in the header row must not cause rows to be skipped
+        csv_text = (
+            "filename, title, date_published, document_type\r\n"
+            "report.pdf,Spaced Report,2021,Report\r\n"
+        )
+        zip_file = self._build_zip(csv_text, {"report.pdf": b"%PDF-1.4 test"})
+
+        response = self.client.post(
+            reverse("admin:ask_pdfresource_upload_zip"), {"zip_file": zip_file}
+        )
+        self.assertEqual(response.status_code, 302)
+
+        pdf = PDFResource.objects.get(title="Spaced Report")
+        self.assertEqual(pdf.date_published, datetime.date(2021, 1, 1))
+        self.assertEqual(pdf.document_type.name, "Report")

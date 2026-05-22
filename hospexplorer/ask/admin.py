@@ -499,7 +499,12 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
 
                 csv_text = archive.read(csv_names[0]).decode("utf-8-sig")
                 reader = csv.DictReader(io.StringIO(csv_text))
-                csv_columns = {(name or "").strip() for name in (reader.fieldnames or [])}
+                # strip header names so the column check and per-row lookups use
+                # the same keys; otherwise a header like "filename, title" leaves
+                # stray spaces and every row reads as missing its required fields
+                if reader.fieldnames:
+                    reader.fieldnames = [(name or "").strip() for name in reader.fieldnames]
+                csv_columns = set(reader.fieldnames or [])
                 if not required_columns.issubset(csv_columns):
                     missing = ", ".join(sorted(required_columns - csv_columns))
                     messages.error(request, f"CSV is missing required columns: {missing}.")
