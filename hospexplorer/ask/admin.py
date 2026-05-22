@@ -478,6 +478,9 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
                 messages.error(request, "Please select a zip file to upload.")
                 return HttpResponseRedirect(request.path)
 
+            update_file = bool(request.POST.get("update_file"))
+            update_metadata = bool(request.POST.get("update_metadata"))
+
             try:
                 archive = zipfile.ZipFile(zip_file)
             except zipfile.BadZipFile:
@@ -529,7 +532,9 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
 
                 total = 0
                 saved = 0
-                queued_ids = []
+                updated = 0
+                queued_new_ids = []
+                queued_replace_ids = []
                 for row in reader:
                     total += 1
                     filename = (row.get(filename_col) or "").strip()
@@ -542,19 +547,45 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
                         continue
 
                     basename = os.path.basename(filename)
-                    if (basename, title) in existing_pdfs:
+                    is_update = (basename, title) in existing_pdfs
+
+                    if is_update and not (update_file or update_metadata):
                         messages.warning(request, f"Row {total}: '{filename}' already exists; skipped.")
                         continue
 
-                    member = zip_members.get(filename) or zip_members.get(basename)
-                    if not member:
-                        messages.warning(request, f"Row {total}: '{filename}' not in zip; skipped.")
-                        continue
+                    # only read PDF bytes when we'll actually use them: new rows
+                    # always need them; existing rows only when update_file is set
+                    pdf_bytes = None
+                    if (not is_update) or update_file:
+                        member = zip_members.get(filename) or zip_members.get(basename)
+                        if not member:
+                            messages.warning(request, f"Row {total}: '{filename}' not in zip; skipped.")
+                            continue
+                        try:
+                            pdf_bytes = archive.read(member)
+                        except KeyError:
+                            messages.warning(request, f"Row {total}: could not read '{filename}'; skipped.")
+                            continue
 
-                    try:
-                        pdf_bytes = archive.read(member)
-                    except KeyError:
-                        messages.warning(request, f"Row {total}: could not read '{filename}'; skipped.")
+                    if is_update:
+                        match = PDFResource.objects.filter(
+                            original_filename=basename, title=title
+                        ).first()
+                        if match is None:
+                            messages.warning(request, f"Row {total}: '{filename}' lookup failed; skipped.")
+                            continue
+                        if update_metadata:
+                            for warning in _apply_zip_csv_metadata(match, row):
+                                messages.warning(request, f"Row {total}: {warning}")
+                        if update_file:
+                            match.file.delete(save=False)
+                            match.file.save(basename, ContentFile(pdf_bytes), save=False)
+                        match.modifier = request.user
+                        match.status = PDFResource.Status.PROCESSING
+                        match.status_message = "Queued for Knowledge Base re-upload."
+                        match.save()
+                        updated += 1
+                        queued_replace_ids.append(match.pk)
                         continue
 
                     obj = PDFResource(
@@ -570,12 +601,21 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
                     obj.file.save(basename, ContentFile(pdf_bytes), save=True)
                     saved += 1
                     existing_pdfs.add((basename, title))
-                    queued_ids.append(obj.pk)
+                    queued_new_ids.append(obj.pk)
 
                 # fire KB uploads after the request transaction commits so background
                 # threads see the just-saved rows
-                def _start_uploads(ids=tuple(queued_ids)):
-                    for pk in ids:
+                def _start_uploads(
+                    new_ids=tuple(queued_new_ids),
+                    replace_ids=tuple(queued_replace_ids),
+                ):
+                    for pk in new_ids:
+                        threading.Thread(
+                            target=run_kb_resource_upload,
+                            args=("pdf", pk),
+                            daemon=True,
+                        ).start()
+                    for pk in replace_ids:
                         threading.Thread(
                             target=run_kb_resource_upload,
                             args=("pdf", pk),
@@ -585,8 +625,9 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
 
                 messages.success(
                     request,
-                    f"Imported {saved} of {total} PDFs. Knowledge Base uploads are running in the "
-                    "background — refresh the list to see each row's final status.",
+                    f"Imported {saved} new and updated {updated} of {total} PDF rows. "
+                    "Knowledge Base uploads are running in the background — "
+                    "refresh the list to see each row's final status.",
                 )
                 return HttpResponseRedirect(changelist_url)
 
