@@ -118,6 +118,8 @@ class WebsiteResource(Resource):
 
 class PDFResource(Resource):
     file = models.FileField(upload_to="kb_pdfs/")
+    # original upload name, kept so re-uploads can be skipped — Django renames file.name on collision
+    original_filename = models.CharField(max_length=255, blank=True, default="")
     mcp_kb_document_id = models.IntegerField(null=True, blank=True, help_text="Document ID returned by the MCP Knowledge Base.")
 
     class Meta:
