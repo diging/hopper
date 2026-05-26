@@ -285,6 +285,12 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
         obj.modifier = request.user
         obj.status = PDFResource.Status.PROCESSING
         obj.status_message = "Queued for Knowledge Base upload."
+        
+        # record the original name so the zip upload's duplicate check sees PDFs
+        # added through this form too; do it before save() mangles file.name on collision
+        if not change or "file" in form.changed_data:
+            obj.original_filename = os.path.basename(obj.file.name)
+        
         super().save_model(request, obj, form, change)
 
         transaction.on_commit(
@@ -361,6 +367,12 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
                 for n in real_names:
                     zip_members.setdefault(os.path.basename(n), n)
 
+                # a PDF already exists when both its original filename and
+                # title match a row already imported
+                existing_pdfs = set(
+                    PDFResource.objects.values_list("original_filename", "title")
+                )
+
                 total = 0
                 saved = 0
                 queued_ids = []
@@ -375,7 +387,12 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
                         )
                         continue
 
-                    member = zip_members.get(filename) or zip_members.get(os.path.basename(filename))
+                    basename = os.path.basename(filename)
+                    if (basename, title) in existing_pdfs:
+                        messages.warning(request, f"Row {total}: '{filename}' already exists; skipped.")
+                        continue
+
+                    member = zip_members.get(filename) or zip_members.get(basename)
                     if not member:
                         messages.warning(request, f"Row {total}: '{filename}' not in zip; skipped.")
                         continue
@@ -388,13 +405,15 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
 
                     obj = PDFResource(
                         title=title,
+                        original_filename=basename,
                         creator=request.user,
                         modifier=request.user,
                         status=PDFResource.Status.PROCESSING,
                         status_message="Queued for Knowledge Base upload.",
                     )
-                    obj.file.save(os.path.basename(filename), ContentFile(pdf_bytes), save=True)
+                    obj.file.save(basename, ContentFile(pdf_bytes), save=True)
                     saved += 1
+                    existing_pdfs.add((basename, title))
                     queued_ids.append(obj.pk)
 
                 # fire KB uploads after the request transaction commits so background
