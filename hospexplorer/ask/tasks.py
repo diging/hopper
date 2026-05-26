@@ -161,15 +161,20 @@ def _build_resource_metadata(obj):
     }
 
 
-def run_kb_resource_upload(model_label, resource_id):
+def run_kb_resource_upload(model_label, resource_id, replace=False):
     """Background thread: push a resource to the MCP KB and record its doc_id.
 
     Runs outside the admin's atomic save transaction so a slow or timing-out
     MCP call can't roll back the local row. The object's status/status_message
     are updated at each phase so the admin can surface progress and errors.
+
+    When ``replace`` is True and the row already has an ``mcp_kb_document_id``,
+    the existing KB doc is deleted before the new one is added — used by the
+    zip importer when an "update file" / "update metadata" re-upload would
+    otherwise leave the old chunks in the KB alongside the new ones.
     """
     from ask.models import WebsiteResource, PDFResource, Resource
-    from ask.kb_connector import add_pdf_to_kb, add_website_to_kb
+    from ask.kb_connector import add_pdf_to_kb, add_website_to_kb, delete_kb_document
 
     if model_label == "pdf":
         Model = PDFResource
@@ -184,6 +189,19 @@ def run_kb_resource_upload(model_label, resource_id):
     except Model.DoesNotExist:
         logger.error("run_kb_resource_upload: %s id=%s not found", model_label, resource_id)
         return
+
+    if replace and obj.mcp_kb_document_id:
+        # best-effort: if delete fails the re-add still happens, leaving a
+        # stale duplicate in the KB rather than losing the new upload
+        old_doc_id = obj.mcp_kb_document_id
+        try:
+            delete_kb_document(old_doc_id)
+        except Exception:
+            logger.warning(
+                "run_kb_resource_upload: failed to delete old KB doc_id=%s for %s id=%s; "
+                "re-adding anyway", old_doc_id, model_label, resource_id,
+            )
+        obj.mcp_kb_document_id = None
 
     try:
         metadata = _build_resource_metadata(obj)

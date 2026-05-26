@@ -619,6 +619,7 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
                         threading.Thread(
                             target=run_kb_resource_upload,
                             args=("pdf", pk),
+                            kwargs={"replace": True},
                             daemon=True,
                         ).start()
                 transaction.on_commit(_start_uploads)
