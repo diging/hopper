@@ -1,4 +1,3 @@
-import datetime
 import io
 import shutil
 import tempfile
@@ -11,7 +10,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from ask.admin import _apply_zip_csv_metadata
-from ask.admin_csv import parse_partial_date
+from ask.admin_csv import normalize_partial_date
 from ask.models import (
     DocumentAuthorInstitution,
     DocumentType,
@@ -61,34 +60,32 @@ class PDFResourceDeletionTests(TestCase):
         self.assertFalse(pdf.file_deletion_failed)
 
 
-class ParsePartialDateTests(TestCase):
+class NormalizePartialDateTests(TestCase):
     def test_full_date(self):
-        self.assertEqual(
-            parse_partial_date("2024-03-15"), (datetime.date(2024, 3, 15), "day")
-        )
+        self.assertEqual(normalize_partial_date("2024-03-15"), "2024-03-15")
 
     def test_year_month(self):
-        self.assertEqual(
-            parse_partial_date("2024-03"), (datetime.date(2024, 3, 1), "month")
-        )
+        self.assertEqual(normalize_partial_date("2024-03"), "2024-03")
 
     def test_year_only(self):
-        self.assertEqual(
-            parse_partial_date("2024"), (datetime.date(2024, 1, 1), "year")
-        )
+        self.assertEqual(normalize_partial_date("2024"), "2024")
 
     def test_blank_or_none_returns_empty(self):
-        self.assertEqual(parse_partial_date(""), (None, ""))
-        self.assertEqual(parse_partial_date("   "), (None, ""))
-        self.assertEqual(parse_partial_date(None), (None, ""))
+        self.assertEqual(normalize_partial_date(""), "")
+        self.assertEqual(normalize_partial_date("   "), "")
+        self.assertEqual(normalize_partial_date(None), "")
 
     def test_impossible_calendar_dates_rejected(self):
-        self.assertEqual(parse_partial_date("2024-13"), (None, ""))
-        self.assertEqual(parse_partial_date("2024-02-30"), (None, ""))
+        with self.assertRaises(ValueError):
+            normalize_partial_date("2024-13")
+        with self.assertRaises(ValueError):
+            normalize_partial_date("2024-02-30")
 
     def test_non_iso_input_rejected(self):
-        self.assertEqual(parse_partial_date("March 2024"), (None, ""))
-        self.assertEqual(parse_partial_date("24-03-15"), (None, ""))
+        with self.assertRaises(ValueError):
+            normalize_partial_date("March 2024")
+        with self.assertRaises(ValueError):
+            normalize_partial_date("24-03-15")
 
 
 class ApplyZipCsvMetadataTests(TestCase):
@@ -101,8 +98,7 @@ class ApplyZipCsvMetadataTests(TestCase):
             "institution_type": "NGO",
         })
         self.assertEqual(warnings, [])
-        self.assertEqual(obj.date_published, datetime.date(2023, 6, 1))
-        self.assertEqual(obj.date_published_precision, "month")
+        self.assertEqual(obj.date_published, "2023-06")
         self.assertEqual(obj.document_type.name, "Report")
         self.assertEqual(obj.document_author_institution.name, "WHO")
         self.assertEqual(obj.institution_type.name, "NGO")
@@ -119,7 +115,7 @@ class ApplyZipCsvMetadataTests(TestCase):
         obj = PDFResource(title="Doc")
         warnings = _apply_zip_csv_metadata(obj, {"document_type": "  ", "date_published": ""})
         self.assertEqual(warnings, [])
-        self.assertIsNone(obj.date_published)
+        self.assertEqual(obj.date_published, "")
         self.assertIsNone(obj.document_type_id)
         self.assertEqual(_apply_zip_csv_metadata(PDFResource(title="Doc"), {}), [])
 
@@ -128,7 +124,7 @@ class ApplyZipCsvMetadataTests(TestCase):
         warnings = _apply_zip_csv_metadata(obj, {"date_published": "not-a-date"})
         self.assertEqual(len(warnings), 1)
         self.assertIn("date_published", warnings[0])
-        self.assertIsNone(obj.date_published)
+        self.assertEqual(obj.date_published, "")
 
 
 @override_settings(PDF_ZIP_CSV_COLUMNS=("filename", "title"))
@@ -166,8 +162,7 @@ class ZipUploadViewTests(TestCase):
         self.assertEqual(response.status_code, 302)
 
         pdf = PDFResource.objects.get(title="Annual Report")
-        self.assertEqual(pdf.date_published, datetime.date(2022, 1, 1))
-        self.assertEqual(pdf.date_published_precision, "year")
+        self.assertEqual(pdf.date_published, "2022")
         self.assertEqual(pdf.document_type.name, "Report")
         self.assertEqual(pdf.document_author_institution.name, "WHO")
         self.assertEqual(pdf.institution_type.name, "NGO")
@@ -182,7 +177,7 @@ class ZipUploadViewTests(TestCase):
         self.assertEqual(response.status_code, 302)
 
         pdf = PDFResource.objects.get(title="Plain Report")
-        self.assertIsNone(pdf.date_published)
+        self.assertEqual(pdf.date_published, "")
         self.assertIsNone(pdf.document_type_id)
 
     def test_zip_import_tolerates_whitespace_in_csv_header(self):
@@ -199,5 +194,5 @@ class ZipUploadViewTests(TestCase):
         self.assertEqual(response.status_code, 302)
 
         pdf = PDFResource.objects.get(title="Spaced Report")
-        self.assertEqual(pdf.date_published, datetime.date(2021, 1, 1))
+        self.assertEqual(pdf.date_published, "2021")
         self.assertEqual(pdf.document_type.name, "Report")

@@ -151,8 +151,7 @@ def _build_resource_metadata(obj):
     self-describing and doesn't depend on hosp-explorer's local IDs.
     """
     return {
-        "date_published": obj.date_published.isoformat() if obj.date_published else None,
-        "date_published_precision": obj.date_published_precision or None,
+        "date_published": obj.date_published or None,
         "document_type": obj.document_type.name if obj.document_type_id else None,
         "document_author_institution": (
             obj.document_author_institution.name if obj.document_author_institution_id else None
