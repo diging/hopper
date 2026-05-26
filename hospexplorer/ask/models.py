@@ -43,11 +43,6 @@ class Resource(models.Model):
         ERROR = "error", "Error"
         WARNING = "warning", "Warning"
 
-    class DatePrecision(models.TextChoices):
-        YEAR = "year", "Year"
-        MONTH = "month", "Month"
-        DAY = "day", "Day"
-
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True, default="")
     creator = models.ForeignKey(
@@ -71,13 +66,9 @@ class Resource(models.Model):
     )
     status_message = models.TextField(blank=True, default="")
 
-    date_published = models.DateField(null=True, blank=True)
-    date_published_precision = models.CharField(
-        max_length=10,
-        choices=DatePrecision.choices,
-        blank=True,
-        default="",
-    )
+    # ISO 8601 partial date: YYYY, YYYY-MM, or YYYY-MM-DD. Lexicographic
+    # ordering of the string also orders chronologically.
+    date_published = models.CharField(max_length=10, blank=True, default="")
     document_type = models.ForeignKey(
         "DocumentType",
         on_delete=models.SET_NULL,

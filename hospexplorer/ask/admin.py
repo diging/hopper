@@ -27,7 +27,7 @@ from ask.models import (
     DocumentAuthorInstitution,
     InstitutionType,
 )
-from ask.admin_csv import import_names_csv, parse_partial_date
+from ask.admin_csv import import_names_csv, normalize_partial_date
 from ask.kb_connector import delete_kb_document
 from ask.tasks import run_kb_resource_upload
 
@@ -295,7 +295,7 @@ class WebsiteResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
     fieldsets = (
         (None, {"fields": ("title", "description", "url")}),
         ("Metadata", {"fields": (
-            "date_published", "date_published_precision",
+            "date_published",
             "document_type", "document_author_institution", "institution_type",
         )}),
         ("Status", {"fields": (
@@ -307,7 +307,7 @@ class WebsiteResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
         "title": "A short name to identify this website resource.",
         "description": "Optional details about what this website covers.",
         "url": "The URL the LLM will use as context when answering questions.",
-        "date_published_precision": "Granularity of the date above (year / month / day). Leave blank if unknown.",
+        "date_published": "Partial ISO date: YYYY, YYYY-MM, or YYYY-MM-DD. Leave blank if unknown.",
     }
 
     def get_form(self, request, obj=None, **kwargs):
@@ -362,11 +362,9 @@ def _apply_zip_csv_metadata(obj, row):
 
     date_raw = (row.get("date_published") or "").strip()
     if date_raw:
-        parsed_date, precision = parse_partial_date(date_raw)
-        if parsed_date:
-            obj.date_published = parsed_date
-            obj.date_published_precision = precision
-        else:
+        try:
+            obj.date_published = normalize_partial_date(date_raw)
+        except ValueError:
             warnings.append(
                 f"invalid date_published '{date_raw}' "
                 "(use YYYY, YYYY-MM or YYYY-MM-DD); left blank"
@@ -394,7 +392,7 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
     fieldsets = (
         (None, {"fields": ("title", "description", "file")}),
         ("Metadata", {"fields": (
-            "date_published", "date_published_precision",
+            "date_published",
             "document_type", "document_author_institution", "institution_type",
         )}),
         ("Status", {"fields": (
@@ -406,7 +404,7 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
         "title": "A short name to identify this PDF resource.",
         "description": "Optional details about what this PDF covers.",
         "file": "The PDF file the LLM will use as context when answering questions.",
-        "date_published_precision": "Granularity of the date above (year / month / day). Leave blank if unknown.",
+        "date_published": "Partial ISO date: YYYY, YYYY-MM, or YYYY-MM-DD. Leave blank if unknown.",
     }
 
     # Column names the bulk-import CSV must define (first = zip member, second = resource title)
