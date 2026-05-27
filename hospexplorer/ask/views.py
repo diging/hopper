@@ -347,6 +347,47 @@ def kb_add_resource(request):
 
 @login_required
 @require_POST
+def kb_add_pdf_resource(request):
+    """Create a PDFResource record for an untracked KB PDF document.
+
+    This tracks a KB PDF in Hopper's internal database without re-ingesting
+    or downloading the file — the document already exists in the KB, which
+    remains the source of truth for the bytes. The new PDFResource has no
+    local file attached.
+    """
+
+    if not request.user.has_perm("ask.add_pdfresource"):
+        return JsonResponse({"success": False, "error": "Permission denied."}, status=403)
+
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"success": False, "error": "Invalid request body."}, status=400)
+
+    doc_id = body.get("doc_id")
+    title = (body.get("title") or "").strip()
+
+    try:
+        doc_id = int(doc_id)
+    except (TypeError, ValueError):
+        return JsonResponse({"success": False, "error": "doc_id is required."}, status=400)
+
+    if PDFResource.objects.filter(mcp_kb_document_id=doc_id).exists():
+        return JsonResponse({"success": False, "error": "Already tracked in Hopper."}, status=400)
+
+    resource = PDFResource.objects.create(
+        title=title or f"Untitled KB doc {doc_id}",
+        mcp_kb_document_id=doc_id,
+        creator=request.user,
+        modifier=request.user,
+        status=PDFResource.Status.SUCCESS,
+        status_message="Tracked from KB; file not stored locally.",
+    )
+    return JsonResponse({"success": True, "id": resource.id})
+
+
+@login_required
+@require_POST
 def kb_remove_from_kb(request):
     """Delete a document from the MCP KB server."""
 

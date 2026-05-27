@@ -263,15 +263,27 @@
                             <thead>
                                 <tr>
                                     <th>Title</th>
-                                    {% if can_delete_pdf %}<th>Actions</th>{% endif %}
+                                    {% if can_add_pdf or can_delete_pdf %}<th>Actions</th>{% endif %}
                                 </tr>
                             </thead>
                             <tbody>
                                 <template x-for="doc in untrackedPdfs" :key="doc.doc_id">
                                     <tr class="kb-row-untracked">
                                         <td x-text="doc.title"></td>
-                                        {% if can_delete_pdf %}
+                                        {% if can_add_pdf or can_delete_pdf %}
                                         <td class="text-nowrap align-middle">
+                                            {% if can_add_pdf %}
+                                            <button
+                                                @click="trackPdfInHopper(doc)"
+                                                :disabled="loadingKey === 'track-pdf-' + doc.doc_id"
+                                                class="btn btn-sm btn-primary-maroon kb-action-btn me-1">
+                                                <span x-show="loadingKey !== 'track-pdf-' + doc.doc_id">Track in Hopper</span>
+                                                <span x-show="loadingKey === 'track-pdf-' + doc.doc_id">
+                                                    <span class="spinner-border spinner-border-sm me-1"></span> Tracking...
+                                                </span>
+                                            </button>
+                                            {% endif %}
+                                            {% if can_delete_pdf %}
                                             <button
                                                 @click="removeFromKb(doc)"
                                                 :disabled="loadingKey === 'remove-' + doc.doc_id"
@@ -281,6 +293,7 @@
                                                     <span class="spinner-border spinner-border-sm me-1"></span> Removing...
                                                 </span>
                                             </button>
+                                            {% endif %}
                                         </td>
                                         {% endif %}
                                     </tr>
@@ -534,6 +547,31 @@ function kbCompare() {
                     this.showToast(`Now tracking "${doc.title}" in Hopper.`);
                 } else {
                     this.showToast(data.error || 'Failed to track resource.', 'error');
+                }
+            } catch (e) {
+                this.showToast('Failed to connect to server.', 'error');
+            }
+            this.loadingKey = null;
+        },
+
+        async trackPdfInHopper(doc) {
+            this.loadingKey = `track-pdf-${doc.doc_id}`;
+            try {
+                const response = await fetch('{% url "ask:kb-add-pdf-resource" %}', {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': '{{ csrf_token }}',
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ doc_id: doc.doc_id, title: doc.title }),
+                });
+                const data = await response.json();
+                if (data.success) {
+                    this.untrackedPdfs = this.untrackedPdfs.filter(d => d.doc_id !== doc.doc_id);
+                    this.showToast(`Now tracking "${doc.title}" in Hopper.`);
+                    setTimeout(() => window.location.reload(), 600);
+                } else {
+                    this.showToast(data.error || 'Failed to track PDF.', 'error');
                 }
             } catch (e) {
                 this.showToast('Failed to connect to server.', 'error');
