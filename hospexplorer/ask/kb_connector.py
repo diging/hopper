@@ -104,6 +104,46 @@ def add_pdf_to_kb(file_bytes, filename, title, url=None):
     raise last_exc
 
 
+def download_kb_pdf(doc_id):
+    """Download the original PDF bytes for a KB document.
+
+    Calls GET /docs/{doc_id}/file on the MCP KB server. Returns
+    (filename, bytes) on 200, or None on 404 (the KB has no local file
+    for that document — the caller should fall back to a tracking-only
+    record). Other HTTP errors propagate as today.
+    """
+    headers = {
+        "Authorization": f"Bearer {settings.KB_MCP_JWT_TOKEN}",
+    }
+    endpoint = f"{settings.KB_MCP_HOST}/docs/{doc_id}/file"
+
+    with httpx.Client() as client:
+        response = client.get(
+            endpoint,
+            headers=headers,
+            timeout=settings.KB_MCP_PDF_TIMEOUT,
+        )
+
+    if response.status_code == 404:
+        return None
+    response.raise_for_status()
+
+    filename = f"kb_doc_{doc_id}.pdf"
+    cd = response.headers.get("content-disposition", "")
+    # prefer KB filename
+    if "filename=" in cd:
+        try:
+            raw = cd.split("filename=", 1)[1].split(";", 1)[0].strip()
+            if raw.startswith('"') and raw.endswith('"'):
+                raw = raw[1:-1]
+            if raw:
+                filename = raw
+        except Exception:
+            pass
+
+    return filename, response.content
+
+
 def delete_kb_document(doc_id):
     """Delete a document from the MCP KB server by its ID.
 

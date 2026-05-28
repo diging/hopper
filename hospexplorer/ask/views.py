@@ -13,7 +13,9 @@ from django.core.paginator import Paginator
 
 from ask.models import Conversation, QARecord, QueryTask, TermsAcceptance, WebsiteResource, PDFResource
 from ask.tasks import run_llm_task
-from ask.kb_connector import list_kb_documents, add_website_to_kb, add_pdf_to_kb, delete_kb_document
+from django.core.files.base import ContentFile
+
+from ask.kb_connector import list_kb_documents, add_website_to_kb, add_pdf_to_kb, delete_kb_document, download_kb_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -375,13 +377,31 @@ def kb_add_pdf_resource(request):
     if PDFResource.objects.filter(mcp_kb_document_id=doc_id).exists():
         return JsonResponse({"success": False, "error": "Already tracked in Hopper."}, status=400)
 
+    try:
+        downloaded = download_kb_pdf(doc_id)
+    except httpx.ConnectError:
+        return JsonResponse({"success": False, "error": "Could not connect to the Knowledge Base server."}, status=503)
+    except httpx.HTTPStatusError as e:
+        return JsonResponse({"success": False, "error": f"Knowledge Base server returned an error (HTTP {e.response.status_code})."}, status=502)
+
+    file_field = None
+    original_filename = ""
+    status_message = "Tracked from KB; file not stored locally."
+    if downloaded is not None:
+        filename, content = downloaded
+        file_field = ContentFile(content, name=filename)
+        original_filename = filename
+        status_message = ""
+
     resource = PDFResource.objects.create(
         title=title or f"Untitled KB doc {doc_id}",
+        file=file_field,
+        original_filename=original_filename,
         mcp_kb_document_id=doc_id,
         creator=request.user,
         modifier=request.user,
         status=PDFResource.Status.SUCCESS,
-        status_message="Tracked from KB; file not stored locally.",
+        status_message=status_message,
     )
     return JsonResponse({"success": True, "id": resource.id})
 
