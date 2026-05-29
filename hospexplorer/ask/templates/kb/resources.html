@@ -568,8 +568,26 @@ function kbCompare() {
                 const data = await response.json();
                 if (data.success) {
                     this.untrackedPdfs = this.untrackedPdfs.filter(d => d.doc_id !== doc.doc_id);
+                    this.pdfStatusMap[data.id] = 'in_kb';
+
+                    const tbody = document.querySelector('#pdfs-pane .kb-table tbody');
+                    if (tbody) {
+                        const tr = document.createElement('tr');
+                        tr.className = 'kb-row-maroon';
+                        const filename = data.filename || '';
+                        const truncFilename = filename.length > 40 ? filename.slice(0, 37) + '...' : filename;
+                        const now = new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+                        tr.innerHTML = `
+                            <td>${data.title}</td>
+                            <td class="text-muted">${truncFilename}</td>
+                            <td class="text-muted">${now}</td>
+                            <td>In Sync</td>
+                            {% if can_change_pdf %}<td></td>{% endif %}
+                        `;
+                        tbody.prepend(tr);
+                    }
+
                     this.showToast(`Now tracking "${doc.title}" in Hopper.`);
-                    setTimeout(() => window.location.reload(), 600);
                 } else {
                     this.showToast(data.error || 'Failed to track PDF.', 'error');
                 }

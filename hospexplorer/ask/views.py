@@ -403,7 +403,12 @@ def kb_add_pdf_resource(request):
         status=PDFResource.Status.SUCCESS,
         status_message=status_message,
     )
-    return JsonResponse({"success": True, "id": resource.id})
+    return JsonResponse({
+        "success": True,
+        "id": resource.id,
+        "title": resource.title,
+        "filename": resource.file.name if resource.file else "",
+    })
 
 
 @login_required
