@@ -90,6 +90,15 @@ def add_pdf_to_kb(file_bytes, filename, title, url=None):
                 )
             response.raise_for_status()
             return response.json()
+        except httpx.TimeoutException as e:
+            # ReadTimeout/WriteTimeout are TransportError subclasses
+            # let them propagate so the caller's timeout handler runs instead
+            # of the retry loop
+            logger.warning(
+                "KB PDF push timed out for %s: %s; not retrying (KB may still be processing)",
+                filename, e,
+            )
+            raise
         except httpx.TransportError as e:
             last_exc = e
             if attempt == attempts:
