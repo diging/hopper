@@ -378,7 +378,7 @@ def kb_add_pdf_resource(request):
         return JsonResponse({"success": False, "error": "Already tracked in Hopper."}, status=400)
 
     try:
-        downloaded = download_kb_pdf(doc_id)
+        filename, content = download_kb_pdf(doc_id)
     except httpx.ConnectError:
         return JsonResponse({"success": False, "error": "Could not connect to the Knowledge Base server."}, status=503)
     except httpx.HTTPStatusError as e:
@@ -387,8 +387,7 @@ def kb_add_pdf_resource(request):
     file_field = None
     original_filename = ""
     status_message = "Tracked from KB; file not stored locally."
-    if downloaded is not None:
-        filename, content = downloaded
+    if content is not None:
         file_field = ContentFile(content, name=filename)
         original_filename = filename
         status_message = ""

@@ -117,9 +117,10 @@ def download_kb_pdf(doc_id):
     """Download the original PDF bytes for a KB document.
 
     Calls GET /docs/{doc_id}/file on the MCP KB server. Returns
-    (filename, bytes) on 200, or None on 404 (the KB has no local file
-    for that document — the caller should fall back to a tracking-only
-    record). Other HTTP errors propagate as today.
+    (filename, bytes) on 200, or (None, None) on 404 — the KB has no
+    local file for that document and the caller should fall back to a
+    tracking-only record. Other HTTP error statuses raise via
+    response.raise_for_status(); transport errors raise via httpx.
     """
     headers = {
         "Authorization": f"Bearer {settings.KB_MCP_JWT_TOKEN}",
@@ -134,7 +135,7 @@ def download_kb_pdf(doc_id):
         )
 
     if response.status_code == 404:
-        return None
+        return None, None
     response.raise_for_status()
 
     filename = f"kb_doc_{doc_id}.pdf"

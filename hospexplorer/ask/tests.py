@@ -97,7 +97,7 @@ class KBAddPdfResourceViewTests(TestCase):
 
     @patch("ask.views.download_kb_pdf")
     def test_creates_tracking_only_when_kb_has_no_file(self, mock_download):
-        mock_download.return_value = None
+        mock_download.return_value = (None, None)
         resp = self._post({"doc_id": 42, "title": "Legacy doc"})
         self.assertEqual(resp.status_code, 200)
         pdf = PDFResource.objects.get(pk=resp.json()["id"])
@@ -109,7 +109,7 @@ class KBAddPdfResourceViewTests(TestCase):
 
     @patch("ask.views.download_kb_pdf")
     def test_blank_title_falls_back_to_placeholder(self, mock_download):
-        mock_download.return_value = None
+        mock_download.return_value = (None, None)
         resp = self._post({"doc_id": 7})
         self.assertEqual(resp.status_code, 200)
         pdf = PDFResource.objects.get(pk=resp.json()["id"])
@@ -117,7 +117,7 @@ class KBAddPdfResourceViewTests(TestCase):
 
     @patch("ask.views.download_kb_pdf")
     def test_duplicate_doc_id_refused(self, mock_download):
-        mock_download.return_value = None
+        mock_download.return_value = (None, None)
         first = self._post({"doc_id": 42, "title": "first"})
         self.assertEqual(first.status_code, 200)
         second = self._post({"doc_id": 42, "title": "second"})
@@ -183,11 +183,11 @@ class DownloadKBPdfHelperTests(TestCase):
         self.assertEqual(download_kb_pdf(5), ("1780-foo.pdf", b"%PDF fake"))
 
     @patch("ask.kb_connector.httpx.Client")
-    def test_returns_none_on_404(self, mock_client_cls):
+    def test_returns_none_pair_on_404(self, mock_client_cls):
         mock_client = mock_client_cls.return_value.__enter__.return_value
         mock_client.get.return_value = self._stub_response(status_code=404)
         from ask.kb_connector import download_kb_pdf
-        self.assertIsNone(download_kb_pdf(99))
+        self.assertEqual(download_kb_pdf(99), (None, None))
 
     @patch("ask.kb_connector.httpx.Client")
     def test_falls_back_to_synthetic_filename_when_header_missing(self, mock_client_cls):
