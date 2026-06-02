@@ -27,7 +27,7 @@ from ask.models import (
     DocumentAuthorInstitution,
     InstitutionType,
 )
-from ask.admin_csv import import_names_csv, normalize_partial_date
+from ask.admin_csv import import_names_csv, validate_partial_date
 from ask.kb_connector import delete_kb_document
 from ask.tasks import run_kb_resource_upload
 
@@ -363,7 +363,7 @@ def _apply_zip_csv_metadata(obj, row):
     date_raw = (row.get("date_published") or "").strip()
     if date_raw:
         try:
-            obj.date_published = normalize_partial_date(date_raw)
+            obj.date_published = validate_partial_date(date_raw)
         except ValueError:
             warnings.append(
                 f"invalid date_published '{date_raw}' "
