@@ -338,6 +338,9 @@ def kb_add_resource(request):
     if not url:
         return JsonResponse({"success": False, "error": "URL is required."}, status=400)
 
+    if WebsiteResource.objects.filter(url=url).exists():
+        return JsonResponse({"success": False, "error": "Already tracked in Hopper."}, status=400)
+
     resource = WebsiteResource.objects.create(
         url=url,
         title=title or url,
