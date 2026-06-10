@@ -1,4 +1,3 @@
-import datetime
 import io
 import json
 import shutil
@@ -224,7 +223,7 @@ class ZipUploadViewTests(TestCase):
         self.client.post(reverse("admin:ask_pdfresource_upload_zip"), {"zip_file": zip1})
 
         pdf = PDFResource.objects.get(title="Annual Report")
-        self.assertIsNone(pdf.date_published)
+        self.assertEqual(pdf.date_published, "")
         self.assertIsNone(pdf.document_type_id)
 
         csv_text_2 = (
@@ -241,8 +240,7 @@ class ZipUploadViewTests(TestCase):
 
         self.assertEqual(PDFResource.objects.count(), 1)
         pdf.refresh_from_db()
-        self.assertEqual(pdf.date_published, datetime.date(2024, 3, 1))
-        self.assertEqual(pdf.date_published_precision, "month")
+        self.assertEqual(pdf.date_published, "2024-03")
         self.assertEqual(pdf.document_type.name, "Report")
         with pdf.file.open("rb") as f:
             self.assertEqual(f.read(), b"%PDF-1.4 original")
