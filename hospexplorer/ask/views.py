@@ -13,7 +13,9 @@ from django.core.paginator import Paginator
 
 from ask.models import Conversation, QARecord, QueryTask, TermsAcceptance, WebsiteResource, PDFResource
 from ask.tasks import run_llm_task
-from ask.kb_connector import list_kb_documents, add_website_to_kb, add_pdf_to_kb, delete_kb_document
+from django.core.files.base import ContentFile
+
+from ask.kb_connector import list_kb_documents, add_website_to_kb, add_pdf_to_kb, delete_kb_document, download_kb_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -343,6 +345,69 @@ def kb_add_resource(request):
         modifier=request.user,
     )
     return JsonResponse({"success": True, "id": resource.id})
+
+
+@login_required
+@require_POST
+def kb_add_pdf_resource(request):
+    """Create a PDFResource record for an untracked KB PDF document.
+
+    This tracks a KB PDF in Hopper's internal database without re-ingesting
+    or downloading the file — the document already exists in the KB, which
+    remains the source of truth for the bytes. The new PDFResource has no
+    local file attached.
+    """
+
+    if not request.user.has_perm("ask.add_pdfresource"):
+        return JsonResponse({"success": False, "error": "Permission denied."}, status=403)
+
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"success": False, "error": "Invalid request body."}, status=400)
+
+    doc_id = body.get("doc_id")
+    title = (body.get("title") or "").strip()
+
+    try:
+        doc_id = int(doc_id)
+    except (TypeError, ValueError):
+        return JsonResponse({"success": False, "error": "doc_id is required."}, status=400)
+
+    if PDFResource.objects.filter(mcp_kb_document_id=doc_id).exists():
+        return JsonResponse({"success": False, "error": "Already tracked in Hopper."}, status=400)
+
+    try:
+        filename, content = download_kb_pdf(doc_id)
+    except httpx.ConnectError:
+        return JsonResponse({"success": False, "error": "Could not connect to the Knowledge Base server."}, status=503)
+    except httpx.HTTPStatusError as e:
+        return JsonResponse({"success": False, "error": f"Knowledge Base server returned an error (HTTP {e.response.status_code})."}, status=502)
+
+    file_field = None
+    original_filename = ""
+    status_message = "Tracked from KB; file not stored locally."
+    if content is not None:
+        file_field = ContentFile(content, name=filename)
+        original_filename = filename
+        status_message = ""
+
+    resource = PDFResource.objects.create(
+        title=title or f"Untitled KB doc {doc_id}",
+        file=file_field,
+        original_filename=original_filename,
+        mcp_kb_document_id=doc_id,
+        creator=request.user,
+        modifier=request.user,
+        status=PDFResource.Status.SUCCESS,
+        status_message=status_message,
+    )
+    return JsonResponse({
+        "success": True,
+        "id": resource.id,
+        "title": resource.title,
+        "filename": resource.file.name if resource.file else "",
+    })
 
 
 @login_required

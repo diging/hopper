@@ -95,6 +95,15 @@ def add_pdf_to_kb(file_bytes, filename, title, url=None, metadata=None):
                 )
             response.raise_for_status()
             return response.json()
+        except httpx.TimeoutException as e:
+            # ReadTimeout/WriteTimeout are TransportError subclasses
+            # let them propagate so the caller's timeout handler runs instead
+            # of the retry loop
+            logger.warning(
+                "KB PDF push timed out for %s: %s; not retrying (KB may still be processing)",
+                filename, e,
+            )
+            raise
         except httpx.TransportError as e:
             last_exc = e
             if attempt == attempts:
@@ -107,6 +116,47 @@ def add_pdf_to_kb(file_bytes, filename, title, url=None, metadata=None):
             time.sleep(backoff)
 
     raise last_exc
+
+
+def download_kb_pdf(doc_id):
+    """Download the original PDF bytes for a KB document.
+
+    Calls GET /docs/{doc_id}/file on the MCP KB server. Returns
+    (filename, bytes) on 200, or (None, None) on 404 — the KB has no
+    local file for that document and the caller should fall back to a
+    tracking-only record. Other HTTP error statuses raise via
+    response.raise_for_status(); transport errors raise via httpx.
+    """
+    headers = {
+        "Authorization": f"Bearer {settings.KB_MCP_JWT_TOKEN}",
+    }
+    endpoint = f"{settings.KB_MCP_HOST}/docs/{doc_id}/file"
+
+    with httpx.Client() as client:
+        response = client.get(
+            endpoint,
+            headers=headers,
+            timeout=settings.KB_MCP_PDF_TIMEOUT,
+        )
+
+    if response.status_code == 404:
+        return None, None
+    response.raise_for_status()
+
+    filename = f"kb_doc_{doc_id}.pdf"
+    cd = response.headers.get("content-disposition", "")
+    # prefer KB filename
+    if "filename=" in cd:
+        try:
+            raw = cd.split("filename=", 1)[1].split(";", 1)[0].strip()
+            if raw.startswith('"') and raw.endswith('"'):
+                raw = raw[1:-1]
+            if raw:
+                filename = raw
+        except Exception:
+            pass
+
+    return filename, response.content
 
 
 def delete_kb_document(doc_id):
