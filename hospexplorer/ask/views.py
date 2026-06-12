@@ -15,7 +15,7 @@ from ask.models import Conversation, QARecord, QueryTask, TermsAcceptance, Websi
 from ask.tasks import run_llm_task
 from django.core.files.base import ContentFile
 
-from ask.kb_connector import list_kb_documents, add_website_to_kb, add_pdf_to_kb, delete_kb_document, download_kb_pdf
+from ask.kb_connector import list_kb_documents, add_website_to_kb, add_pdf_to_kb, update_pdf_in_kb, delete_kb_document, download_kb_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -335,19 +335,36 @@ def kb_add_resource(request):
 
     url = body.get("url", "").strip()
     title = body.get("title", "").strip()
+    doc_id = body.get("doc_id")
     if not url:
         return JsonResponse({"success": False, "error": "URL is required."}, status=400)
 
-    if WebsiteResource.objects.filter(url=url).exists():
-        return JsonResponse({"success": False, "error": "Already tracked in Hopper."}, status=400)
+    try:
+        doc_id = int(doc_id) if doc_id is not None else None
+    except (TypeError, ValueError):
+        doc_id = None
+
+    # merge, don't reject if a Hopper resource already exists for this URL
+    # (e.g. created but never linked to the KB), link it to the KB doc instead
+    # of creating a duplicate. .first() is safe against pre-existing duplicates
+    existing = WebsiteResource.objects.filter(url=url).first()
+    if existing is not None:
+        update_fields = ["modifier", "modified_at"]
+        existing.modifier = request.user
+        if doc_id is not None:
+            existing.mcp_kb_document_id = doc_id
+            update_fields.append("mcp_kb_document_id")
+        existing.save(update_fields=update_fields)
+        return JsonResponse({"success": True, "id": existing.id, "merged": True})
 
     resource = WebsiteResource.objects.create(
         url=url,
         title=title or url,
+        mcp_kb_document_id=doc_id,
         creator=request.user,
         modifier=request.user,
     )
-    return JsonResponse({"success": True, "id": resource.id})
+    return JsonResponse({"success": True, "id": resource.id, "merged": False})
 
 
 @login_required
@@ -377,9 +394,39 @@ def kb_add_pdf_resource(request):
     except (TypeError, ValueError):
         return JsonResponse({"success": False, "error": "doc_id is required."}, status=400)
 
-    if PDFResource.objects.filter(mcp_kb_document_id=doc_id).exists():
-        return JsonResponse({"success": False, "error": "Already tracked in Hopper."}, status=400)
+    # Merge, don't reject. 1) Already linked to this KB doc -> idempotent no-op.
+    already = PDFResource.objects.filter(mcp_kb_document_id=doc_id).first()
+    if already is not None:
+        return JsonResponse({
+            "success": True,
+            "id": already.id,
+            "title": already.title,
+            "filename": already.file.name if already.file else "",
+            "merged": True,
+        })
 
+    # 2) An unlinked local row whose title matches the KB doc (e.g. a zip upload
+    #    that never linked to the KB) -> link it in place, no re-download.
+    if title:
+        candidate = PDFResource.objects.filter(
+            mcp_kb_document_id__isnull=True, title=title
+        ).first()
+        if candidate is not None:
+            candidate.mcp_kb_document_id = doc_id
+            candidate.modifier = request.user
+            candidate.status = PDFResource.Status.SUCCESS
+            candidate.save(update_fields=[
+                "mcp_kb_document_id", "modifier", "status", "modified_at",
+            ])
+            return JsonResponse({
+                "success": True,
+                "id": candidate.id,
+                "title": candidate.title,
+                "filename": candidate.file.name if candidate.file else "",
+                "merged": True,
+            })
+
+    # 3) No local row -> download from the KB and create a new tracked row.
     try:
         filename, content = download_kb_pdf(doc_id)
     except httpx.ConnectError:
@@ -410,6 +457,7 @@ def kb_add_pdf_resource(request):
         "id": resource.id,
         "title": resource.title,
         "filename": resource.file.name if resource.file else "",
+        "merged": False,
     })
 
 
@@ -554,7 +602,15 @@ def kb_add_pdf_to_mcp(request):
         resource.file.open("rb")
         file_bytes = resource.file.read()
         resource.file.close()
-        result = add_pdf_to_kb(file_bytes, resource.file.name.split("/")[-1], resource.title)
+        filename = resource.file.name.split("/")[-1]
+        # Re-ingest of an already-linked resource updates the existing KB doc by
+        # id (no duplicate); an unlinked resource is added as a new KB doc.
+        if resource.mcp_kb_document_id:
+            result = update_pdf_in_kb(
+                resource.mcp_kb_document_id, file_bytes, filename, resource.title
+            )
+        else:
+            result = add_pdf_to_kb(file_bytes, filename, resource.title)
         resource.mcp_kb_document_id = result.get("doc_id")
         resource.modifier = request.user
         resource.save(update_fields=["mcp_kb_document_id", "modifier", "modified_at"])
