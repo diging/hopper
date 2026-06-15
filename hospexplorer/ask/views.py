@@ -547,6 +547,15 @@ def kb_add_pdf_to_mcp(request):
     except PDFResource.DoesNotExist:
         return JsonResponse({"success": False, "error": "Resource not found."}, status=404)
 
+    # Tracking-only resources (created without downloading the KB bytes) have no
+    # local file, so there is nothing to re-ingest — fail cleanly instead of
+    # letting the empty FileField raise ValueError.
+    if not resource.file:
+        return JsonResponse(
+            {"success": False, "error": "No local file is stored for this resource, so it can't be re-added to the Knowledge Base. Re-upload the PDF instead."},
+            status=400,
+        )
+
     try:
         resource.file.open("rb")
         file_bytes = resource.file.read()
