@@ -522,29 +522,35 @@ function kbCompare() {
                         'X-CSRFToken': '{{ csrf_token }}',
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ url: doc.url, title: doc.title }),
+                    body: JSON.stringify({ url: doc.url, title: doc.title, doc_id: doc.doc_id }),
                 });
                 const data = await response.json();
                 if (data.success) {
                     this.untracked = this.untracked.filter(d => d.doc_id !== doc.doc_id);
 
-                    const tbody = document.querySelector('#websites-pane .kb-table tbody');
-                    if (tbody) {
-                        const tr = document.createElement('tr');
-                        tr.className = 'kb-row-maroon';
-                        const truncUrl = doc.url.length > 60 ? doc.url.slice(0, 57) + '...' : doc.url;
-                        const now = new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
-                        tr.innerHTML = `
-                            <td>${doc.title}</td>
-                            <td><a href="${doc.url}" target="_blank" rel="noopener" class="kb-link text-truncate d-inline-block" style="max-width: 300px;">${truncUrl}</a></td>
-                            <td class="text-muted">${now}</td>
-                            <td>In Sync</td>
-                            {% if can_change %}<td></td>{% endif %}
-                        `;
-                        tbody.prepend(tr);
+                    if (data.merged) {
+                        // Linked an existing Hopper row — that row is already shown in
+                        // the table, so refresh its status instead of adding a duplicate.
+                        this.statusMap[data.id] = 'in_kb';
+                        this.showToast(`Linked "${doc.title}" to the existing Hopper resource.`);
+                    } else {
+                        const tbody = document.querySelector('#websites-pane .kb-table tbody');
+                        if (tbody) {
+                            const tr = document.createElement('tr');
+                            tr.className = 'kb-row-maroon';
+                            const truncUrl = doc.url.length > 60 ? doc.url.slice(0, 57) + '...' : doc.url;
+                            const now = new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+                            tr.innerHTML = `
+                                <td>${doc.title}</td>
+                                <td><a href="${doc.url}" target="_blank" rel="noopener" class="kb-link text-truncate d-inline-block" style="max-width: 300px;">${truncUrl}</a></td>
+                                <td class="text-muted">${now}</td>
+                                <td>In Sync</td>
+                                {% if can_change %}<td></td>{% endif %}
+                            `;
+                            tbody.prepend(tr);
+                        }
+                        this.showToast(`Now tracking "${doc.title}" in Hopper.`);
                     }
-
-                    this.showToast(`Now tracking "${doc.title}" in Hopper.`);
                 } else {
                     this.showToast(data.error || 'Failed to track resource.', 'error');
                 }
@@ -570,24 +576,29 @@ function kbCompare() {
                     this.untrackedPdfs = this.untrackedPdfs.filter(d => d.doc_id !== doc.doc_id);
                     this.pdfStatusMap[data.id] = 'in_kb';
 
-                    const tbody = document.querySelector('#pdfs-pane .kb-table tbody');
-                    if (tbody) {
-                        const tr = document.createElement('tr');
-                        tr.className = 'kb-row-maroon';
-                        const filename = data.filename || '';
-                        const truncFilename = filename.length > 40 ? filename.slice(0, 37) + '...' : filename;
-                        const now = new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
-                        tr.innerHTML = `
-                            <td>${data.title}</td>
-                            <td class="text-muted">${truncFilename}</td>
-                            <td class="text-muted">${now}</td>
-                            <td>In Sync</td>
-                            {% if can_change_pdf %}<td></td>{% endif %}
-                        `;
-                        tbody.prepend(tr);
+                    if (data.merged) {
+                        // Linked an existing Hopper row — its row is already shown and its
+                        // status was just set above, so don't add a duplicate row.
+                        this.showToast(`Linked "${doc.title}" to the existing Hopper resource.`);
+                    } else {
+                        const tbody = document.querySelector('#pdfs-pane .kb-table tbody');
+                        if (tbody) {
+                            const tr = document.createElement('tr');
+                            tr.className = 'kb-row-maroon';
+                            const filename = data.filename || '';
+                            const truncFilename = filename.length > 40 ? filename.slice(0, 37) + '...' : filename;
+                            const now = new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+                            tr.innerHTML = `
+                                <td>${data.title}</td>
+                                <td class="text-muted">${truncFilename}</td>
+                                <td class="text-muted">${now}</td>
+                                <td>In Sync</td>
+                                {% if can_change_pdf %}<td></td>{% endif %}
+                            `;
+                            tbody.prepend(tr);
+                        }
+                        this.showToast(`Now tracking "${doc.title}" in Hopper.`);
                     }
-
-                    this.showToast(`Now tracking "${doc.title}" in Hopper.`);
                 } else {
                     this.showToast(data.error || 'Failed to track PDF.', 'error');
                 }
