@@ -83,8 +83,11 @@ def _enrich_search_results(content):
             if pdf.file:
                 r["url"] = pdf.file.url
             r["type"] = "PDF"
+            r["publisher"] = pdf.publisher
         elif doc_id in website_doc_ids:
             r["type"] = "Website"
+            website = WebsiteResource.objects.get(mcp_kb_document_id=doc_id)
+            r["publisher"] = website.publisher
         else:
             r["type"] = _infer_type_from_url(r.get("url"))
 
@@ -153,6 +156,7 @@ def _build_resource_metadata(obj):
     return {
         "date_published": obj.date_published or None,
         "document_type": obj.document_type.name if obj.document_type_id else None,
+        "publisher": obj.publisher or None,
         "document_author_institution": (
             obj.document_author_institution.name if obj.document_author_institution_id else None
         ),

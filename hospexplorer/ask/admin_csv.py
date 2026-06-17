@@ -3,8 +3,8 @@ import datetime
 import io
 
 
-def normalize_partial_date(value):
-    """Validate a partial ISO 8601 date string and return its trimmed form.
+def validate_partial_date(value):
+    """Check that ``value`` is a partial ISO 8601 date and return it stripped.
 
     Accepts ``YYYY``, ``YYYY-MM`` or ``YYYY-MM-DD`` (zero-padded). Calendar
     correctness is delegated to ``datetime.date.fromisoformat`` by padding

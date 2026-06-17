@@ -297,6 +297,9 @@ window.renderChatMessage = function(msg) {
                 html += typeBadge;
                 html += '</div>';
                 html += titleHtml;
+                if (r.publisher) {
+                    html += '<p class="search-result-publisher"><strong>Publisher:</strong> ' + escapeHtml(r.publisher) + '</p>';
+                }
                 html += '<p class="search-result-summary">' + summary + '</p>';
                 if (relevance) {
                     html += '<p class="search-result-relevance"><strong>Relevance:</strong> ' + relevance + '</p>';

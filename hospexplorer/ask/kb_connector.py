@@ -118,6 +118,60 @@ def add_pdf_to_kb(file_bytes, filename, title, url=None, metadata=None):
     raise last_exc
 
 
+def update_pdf_in_kb(doc_id, file_bytes, filename, title, url=None):
+    """Update an existing PDF in the MCP KB server by document id.
+
+    Calls POST /docs/pdf/update on the MCP KB server with multipart form data.
+    The KB server re-extracts and replaces the document's chunks in place,
+    keeping the same document id. Mirrors add_pdf_to_kb's retry policy.
+    """
+    headers = {
+        "Authorization": f"Bearer {settings.KB_MCP_JWT_TOKEN}",
+    }
+    endpoint = f"{settings.KB_MCP_HOST}/docs/pdf/update"
+
+    data = {"doc_id": str(doc_id), "title": title}
+    if url:
+        data["url"] = url
+
+    # only retry on transport errors — a timeout
+    # likely means the KB received the file and is still processing it
+    attempts = max(1, settings.KB_MCP_PDF_RETRIES)
+    last_exc = None
+    for attempt in range(1, attempts + 1):
+        # rebuild files each attempt: httpx consumes the stream on send
+        files = {"file": (filename, file_bytes, "application/pdf")}
+        try:
+            with httpx.Client() as client:
+                response = client.post(
+                    endpoint,
+                    headers=headers,
+                    files=files,
+                    data=data,
+                    timeout=settings.KB_MCP_PDF_TIMEOUT,
+                )
+            response.raise_for_status()
+            return response.json()
+        except httpx.TimeoutException as e:
+            logger.warning(
+                "KB PDF update timed out for %s: %s; not retrying (KB may still be processing)",
+                filename, e,
+            )
+            raise
+        except httpx.TransportError as e:
+            last_exc = e
+            if attempt == attempts:
+                break
+            backoff = 2 ** (attempt - 1)
+            logger.warning(
+                "KB PDF update failed (attempt %d/%d) for %s: %s; retrying in %ds",
+                attempt, attempts, filename, e, backoff,
+            )
+            time.sleep(backoff)
+
+    raise last_exc
+
+
 def download_kb_pdf(doc_id):
     """Download the original PDF bytes for a KB document.
 

@@ -27,7 +27,7 @@ from ask.models import (
     DocumentAuthorInstitution,
     InstitutionType,
 )
-from ask.admin_csv import import_names_csv, normalize_partial_date
+from ask.admin_csv import import_names_csv, validate_partial_date
 from ask.kb_connector import delete_kb_document
 from ask.tasks import run_kb_resource_upload
 
@@ -296,7 +296,7 @@ class WebsiteResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
         (None, {"fields": ("title", "description", "url")}),
         ("Metadata", {"fields": (
             "date_published",
-            "document_type", "document_author_institution", "institution_type",
+            "document_type", "document_author_institution", "institution_type", "publisher",
         )}),
         ("Status", {"fields": (
             "status", "status_message", "mcp_kb_document_id",
@@ -308,6 +308,7 @@ class WebsiteResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
         "description": "Optional details about what this website covers.",
         "url": "The URL the LLM will use as context when answering questions.",
         "date_published": "Partial ISO date: YYYY, YYYY-MM, or YYYY-MM-DD. Leave blank if unknown.",
+        "publisher": "The publisher of this website resource.",
     }
 
     def get_form(self, request, obj=None, **kwargs):
@@ -360,15 +361,41 @@ def _apply_zip_csv_metadata(obj, row):
     """
     warnings = []
 
-    date_raw = (row.get("date_published") or "").strip()
+    date_raw = (row.get("Date Published") or "").strip()
     if date_raw:
         try:
-            obj.date_published = normalize_partial_date(date_raw)
+            obj.date_published = validate_partial_date(date_raw)
         except ValueError:
             warnings.append(
-                f"invalid date_published '{date_raw}' "
+                f"invalid Date Published '{date_raw}' "
                 "(use YYYY, YYYY-MM or YYYY-MM-DD); left blank"
             )
+
+    institution_raw = (row.get("Document Author Institution") or "").strip()
+    if institution_raw:
+        try:
+            obj.document_author_institution = DocumentAuthorInstitution.objects.get_or_create(name=institution_raw)[0]
+        except DocumentAuthorInstitution.DoesNotExist:
+            warnings.append(f"invalid Institution '{institution_raw}'; left blank")
+
+    institution_type_raw = (row.get("Institution Type") or "").strip()
+    if institution_type_raw:
+        try:
+            obj.institution_type = InstitutionType.objects.get_or_create(name=institution_type_raw)[0]
+        except InstitutionType.DoesNotExist:
+            warnings.append(f"invalid Institution Type '{institution_type_raw}'; left blank")
+
+    document_type_raw = (row.get("Document Type") or "").strip()
+    if document_type_raw:
+        try:
+            obj.document_type = DocumentType.objects.get_or_create(name=document_type_raw)[0]
+        except DocumentType.DoesNotExist:
+            warnings.append(f"invalid Document Type '{document_type_raw}'; left blank")
+
+    publisher_raw = (row.get("Publisher") or "").strip()
+    if publisher_raw:
+        obj.publisher = publisher_raw
+
 
     for column, model in ZIP_CSV_LOOKUP_COLUMNS.items():
         value = (row.get(column) or "").strip()
@@ -393,7 +420,7 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
         (None, {"fields": ("title", "description", "file")}),
         ("Metadata", {"fields": (
             "date_published",
-            "document_type", "document_author_institution", "institution_type",
+            "document_type", "document_author_institution", "institution_type", "publisher",
         )}),
         ("Status", {"fields": (
             "status", "status_message", "mcp_kb_document_id",
@@ -405,6 +432,7 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
         "description": "Optional details about what this PDF covers.",
         "file": "The PDF file the LLM will use as context when answering questions.",
         "date_published": "Partial ISO date: YYYY, YYYY-MM, or YYYY-MM-DD. Leave blank if unknown.",
+        "publisher": "The publisher of this PDF resource.",
     }
 
     # Column names the bulk-import CSV must define (first = zip member, second = resource title)

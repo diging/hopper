@@ -12,7 +12,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from ask.admin import _apply_zip_csv_metadata
-from ask.admin_csv import normalize_partial_date
+from ask.admin_csv import validate_partial_date
 from ask.models import (
     DocumentAuthorInstitution,
     DocumentType,
@@ -63,32 +63,32 @@ class PDFResourceDeletionTests(TestCase):
         self.assertFalse(pdf.file_deletion_failed)
 
 
-class NormalizePartialDateTests(TestCase):
+class ValidatePartialDateTests(TestCase):
     def test_full_date(self):
-        self.assertEqual(normalize_partial_date("2024-03-15"), "2024-03-15")
+        self.assertEqual(validate_partial_date("2024-03-15"), "2024-03-15")
 
     def test_year_month(self):
-        self.assertEqual(normalize_partial_date("2024-03"), "2024-03")
+        self.assertEqual(validate_partial_date("2024-03"), "2024-03")
 
     def test_year_only(self):
-        self.assertEqual(normalize_partial_date("2024"), "2024")
+        self.assertEqual(validate_partial_date("2024"), "2024")
 
     def test_blank_or_none_returns_empty(self):
-        self.assertEqual(normalize_partial_date(""), "")
-        self.assertEqual(normalize_partial_date("   "), "")
-        self.assertEqual(normalize_partial_date(None), "")
+        self.assertEqual(validate_partial_date(""), "")
+        self.assertEqual(validate_partial_date("   "), "")
+        self.assertEqual(validate_partial_date(None), "")
 
     def test_impossible_calendar_dates_rejected(self):
         with self.assertRaises(ValueError):
-            normalize_partial_date("2024-13")
+            validate_partial_date("2024-13")
         with self.assertRaises(ValueError):
-            normalize_partial_date("2024-02-30")
+            validate_partial_date("2024-02-30")
 
     def test_non_iso_input_rejected(self):
         with self.assertRaises(ValueError):
-            normalize_partial_date("March 2024")
+            validate_partial_date("March 2024")
         with self.assertRaises(ValueError):
-            normalize_partial_date("24-03-15")
+            validate_partial_date("24-03-15")
 
 
 class ApplyZipCsvMetadataTests(TestCase):
