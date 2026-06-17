@@ -141,7 +141,7 @@ def _process_search_results(results):
     doc_ids = {r["document_id"] for r in results["search_results"] if r["document_id"] is not None}
     if doc_ids:
         pdf_by_doc_id = {
-            p.document_id: p
+            p.mcp_kb_document_id: p
             for p in PDFResource.objects.filter(mcp_kb_document_id__in=doc_ids)
         }
         website_doc_ids = set(
