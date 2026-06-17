@@ -153,6 +153,7 @@ def _build_resource_metadata(obj):
     return {
         "date_published": obj.date_published or None,
         "document_type": obj.document_type.name if obj.document_type_id else None,
+        "publisher": obj.publisher or None,
         "document_author_institution": (
             obj.document_author_institution.name if obj.document_author_institution_id else None
         ),

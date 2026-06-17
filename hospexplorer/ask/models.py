@@ -91,6 +91,8 @@ class Resource(models.Model):
         related_name="%(class)s_resources",
     )
 
+    publisher = models.CharField(max_length=255, blank=True, default="")
+
     class Meta:
         abstract = True
 
