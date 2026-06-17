@@ -125,12 +125,43 @@ def poll_query(request, task_id):
     response_data = {"status": task.status}
 
     if task.status == QueryTask.Status.COMPLETED:
-        response_data["message"] = task.result
+        results = json.loads(task.result)
+        results = _process_search_results(results)
+        response_data["message"] = json.dumps(results)
     elif task.status == QueryTask.Status.FAILED:
         response_data["error"] = task.error_message
 
     return JsonResponse(response_data)
 
+
+def _process_search_results(results):
+    """Rearrange search results so that state resources come first and add publisher information."""
+    pdf_by_doc_id = {}
+    website_doc_ids = set()
+    doc_ids = {r["document_id"] for r in results["search_results"] if r["document_id"] is not None}
+    if doc_ids:
+        pdf_by_doc_id = {
+            p.document_id: p
+            for p in PDFResource.objects.filter(mcp_kb_document_id__in=doc_ids)
+        }
+        website_doc_ids = set(
+            WebsiteResource.objects.filter(mcp_kb_document_id__in=doc_ids).values_list(
+                "mcp_kb_document_id", flat=True
+            )
+        )
+
+    for r in results["search_results"]:
+        pdf = pdf_by_doc_id.get(r["document_id"])
+        if pdf is not None:
+            r["publisher"] = pdf.publisher
+        elif r["document_id"] in website_doc_ids:
+            website = WebsiteResource.objects.get(mcp_kb_document_id=r["document_id"])
+            r["publisher"] = website.publisher
+
+    state_resources = [r for r in results["search_results"] if r.get("publisher", "") == "State"]
+    other_resources = [r for r in results["search_results"] if r.get("publisher", "") != "State"]
+    results["search_results"] = state_resources + other_resources
+    return results
 
 
 @login_required
