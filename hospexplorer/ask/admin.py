@@ -16,7 +16,18 @@ from django.http import HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import path, reverse
 
-from ask.models import Conversation, TermsAcceptance, QARecord, SimWorkflow, WebsiteResource, PDFResource
+from ask.models import (
+    Conversation,
+    TermsAcceptance,
+    QARecord,
+    SimWorkflow,
+    WebsiteResource,
+    PDFResource,
+    DocumentType,
+    DocumentAuthorInstitution,
+    InstitutionType,
+)
+from ask.admin_csv import import_names_csv, validate_partial_date
 from ask.kb_connector import delete_kb_document
 from ask.tasks import run_kb_resource_upload
 
@@ -205,16 +216,99 @@ class SimWorkflowAdmin(admin.ModelAdmin):
                 return
 
 
+class LookupCSVImportMixin:
+    """Adds an Import CSV button + upload view to a lookup ModelAdmin.
+
+    CSV is single-column name. Duplicates are skipped, header row optional.
+    """
+
+    change_list_template = "admin/ask/lookup_change_list.html"
+
+    def get_urls(self):
+        urls = super().get_urls()
+        info = (self.model._meta.app_label, self.model._meta.model_name)
+        return [
+            path(
+                "import-csv/",
+                self.admin_site.admin_view(self.import_csv_view),
+                name=f"{info[0]}_{info[1]}_import_csv",
+            ),
+        ] + urls
+
+    def import_csv_view(self, request):
+        info = (self.model._meta.app_label, self.model._meta.model_name)
+        changelist_url = reverse(f"admin:{info[0]}_{info[1]}_changelist")
+
+        if request.method == "POST":
+            file_obj = request.FILES.get("csv_file")
+            if file_obj is None:
+                self.message_user(request, "No file provided.", level="error")
+            elif not file_obj.name.lower().endswith(".csv"):
+                self.message_user(request, "File must have a .csv extension.", level="error")
+            else:
+                try:
+                    created, skipped = import_names_csv(self.model, file_obj)
+                except Exception as e:
+                    logger.exception("CSV import failed for %s", self.model.__name__)
+                    self.message_user(request, f"Import failed: {e}", level="error")
+                else:
+                    self.message_user(
+                        request,
+                        f"Imported {created} new {self.model._meta.verbose_name_plural} "
+                        f"(skipped {skipped} duplicate or empty rows).",
+                    )
+            return HttpResponseRedirect(changelist_url)
+
+        context = {
+            **self.admin_site.each_context(request),
+            "title": f"Import {self.model._meta.verbose_name_plural} from CSV",
+            "opts": self.model._meta,
+            "changelist_url": changelist_url,
+        }
+        return render(request, "admin/ask/lookup_csv_import.html", context)
+
+
+@admin.register(DocumentType)
+class DocumentTypeAdmin(LookupCSVImportMixin, admin.ModelAdmin):
+    list_display = ("name",)
+    search_fields = ("name",)
+
+
+@admin.register(DocumentAuthorInstitution)
+class DocumentAuthorInstitutionAdmin(LookupCSVImportMixin, admin.ModelAdmin):
+    list_display = ("name",)
+    search_fields = ("name",)
+
+
+@admin.register(InstitutionType)
+class InstitutionTypeAdmin(LookupCSVImportMixin, admin.ModelAdmin):
+    list_display = ("name",)
+    search_fields = ("name",)
+
+
 @admin.register(WebsiteResource)
 class WebsiteResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
     list_display = ("title", "url", "creator", "status", "modified_at")
     list_filter = ("status",)
     search_fields = ("title", "url")
     readonly_fields = ("created_at", "modified_at", "creator", "modifier", "mcp_kb_document_id", "status", "status_message")
+    fieldsets = (
+        (None, {"fields": ("title", "description", "url")}),
+        ("Metadata", {"fields": (
+            "date_published",
+            "document_type", "document_author_institution", "institution_type", "publisher"
+        )}),
+        ("Status", {"fields": (
+            "status", "status_message", "mcp_kb_document_id",
+            "created_at", "modified_at", "creator", "modifier",
+        )}),
+    )
     help_texts = {
         "title": "A short name to identify this website resource.",
         "description": "Optional details about what this website covers.",
         "url": "The URL the LLM will use as context when answering questions.",
+        "date_published": "Partial ISO date: YYYY, YYYY-MM, or YYYY-MM-DD. Leave blank if unknown.",
+        "publisher": "The publisher of this website resource.",
     }
 
     def get_form(self, request, obj=None, **kwargs):
@@ -248,16 +342,96 @@ class WebsiteResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
         )
 
 
+# Optional metadata columns the zip-CSV importer reads onto each PDFResource.
+# Controlled-list values create the matching lookup row the first time they
+# appear, so the available options grow from what the imports actually use.
+ZIP_CSV_LOOKUP_COLUMNS = {
+    "document_type": DocumentType,
+    "document_author_institution": DocumentAuthorInstitution,
+    "institution_type": InstitutionType,
+}
+
+
+def _apply_zip_csv_metadata(obj, row):
+    """Populate a resource's metadata fields from one zip-CSV row.
+
+    Every metadata column is optional. Returns a list of human-readable
+    warnings for values that could not be applied — the row is still imported,
+    just with that field left blank.
+    """
+    warnings = []
+
+    date_raw = (row.get("Date Published") or "").strip()
+    if date_raw:
+        try:
+            obj.date_published = validate_partial_date(date_raw)
+        except ValueError:
+            warnings.append(
+                f"invalid Date Published '{date_raw}' "
+                "(use YYYY, YYYY-MM or YYYY-MM-DD); left blank"
+            )
+
+    institution_raw = (row.get("Document Author Institution") or "").strip()
+    if institution_raw:
+        try:
+            obj.document_author_institution = DocumentAuthorInstitution.objects.get_or_create(name=institution_raw)[0]
+        except DocumentAuthorInstitution.DoesNotExist:
+            warnings.append(f"invalid Institution '{institution_raw}'; left blank")
+
+    institution_type_raw = (row.get("Institution Type") or "").strip()
+    if institution_type_raw:
+        try:
+            obj.institution_type = InstitutionType.objects.get_or_create(name=institution_type_raw)[0]
+        except InstitutionType.DoesNotExist:
+            warnings.append(f"invalid Institution Type '{institution_type_raw}'; left blank")
+
+    document_type_raw = (row.get("Document Type") or "").strip()
+    if document_type_raw:
+        try:
+            obj.document_type = DocumentType.objects.get_or_create(name=document_type_raw)[0]
+        except DocumentType.DoesNotExist:
+            warnings.append(f"invalid Document Type '{document_type_raw}'; left blank")
+
+    publisher_raw = (row.get("Publisher") or "").strip()
+    if publisher_raw:
+        obj.publisher = publisher_raw
+
+    for column, model in ZIP_CSV_LOOKUP_COLUMNS.items():
+        value = (row.get(column) or "").strip()
+        if not value:
+            continue
+        if len(value) > 255:
+            warnings.append(f"{column} value exceeds 255 characters; left blank")
+            continue
+        lookup, _ = model.objects.get_or_create(name=value)
+        setattr(obj, column, lookup)
+
+    return warnings
+
+
 @admin.register(PDFResource)
 class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
     list_display = ("title", "file", "creator", "status", "modified_at")
     list_filter = ("status",)
     search_fields = ("title",)
     readonly_fields = ("created_at", "modified_at", "creator", "modifier", "mcp_kb_document_id", "status", "status_message")
+    fieldsets = (
+        (None, {"fields": ("title", "description", "file")}),
+        ("Metadata", {"fields": (
+            "date_published",
+            "document_type", "document_author_institution", "institution_type", "publisher",
+        )}),
+        ("Status", {"fields": (
+            "status", "status_message", "mcp_kb_document_id",
+            "created_at", "modified_at", "creator", "modifier",
+        )}),
+    )
     help_texts = {
         "title": "A short name to identify this PDF resource.",
         "description": "Optional details about what this PDF covers.",
         "file": "The PDF file the LLM will use as context when answering questions.",
+        "date_published": "Partial ISO date: YYYY, YYYY-MM, or YYYY-MM-DD. Leave blank if unknown.",
+        "publisher": "The publisher of this PDF resource.",
     }
 
     # Column names the bulk-import CSV must define (first = zip member, second = resource title)
@@ -356,7 +530,12 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
 
                 csv_text = archive.read(csv_names[0]).decode("utf-8-sig")
                 reader = csv.DictReader(io.StringIO(csv_text))
-                csv_columns = {(name or "").strip() for name in (reader.fieldnames or [])}
+                # strip header names so the column check and per-row lookups use
+                # the same keys; otherwise a header like "filename, title" leaves
+                # stray spaces and every row reads as missing its required fields
+                if reader.fieldnames:
+                    reader.fieldnames = [(name or "").strip() for name in reader.fieldnames]
+                csv_columns = set(reader.fieldnames or [])
                 if not required_columns.issubset(csv_columns):
                     missing = ", ".join(sorted(required_columns - csv_columns))
                     messages.error(request, f"CSV is missing required columns: {missing}.")
@@ -411,6 +590,8 @@ class PDFResourceAdmin(KBDeleteAdminMixin, admin.ModelAdmin):
                         status=PDFResource.Status.PROCESSING,
                         status_message="Queued for Knowledge Base upload.",
                     )
+                    for warning in _apply_zip_csv_metadata(obj, row):
+                        messages.warning(request, f"Row {total}: {warning}")
                     obj.file.save(basename, ContentFile(pdf_bytes), save=True)
                     saved += 1
                     existing_pdfs.add((basename, title))

@@ -6,6 +6,35 @@ from django.db import models
 
 logger = logging.getLogger(__name__)
 
+class DocumentType(models.Model):
+    name = models.CharField(max_length=255, unique=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class DocumentAuthorInstitution(models.Model):
+    name = models.CharField(max_length=255, unique=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class InstitutionType(models.Model):
+    name = models.CharField(max_length=255, unique=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
 # Abstract Model, fields are inherited by subclasses
 class Resource(models.Model):
     class Status(models.TextChoices):
@@ -36,6 +65,33 @@ class Resource(models.Model):
         default=Status.SUCCESS,
     )
     status_message = models.TextField(blank=True, default="")
+
+    # ISO 8601 partial date: YYYY, YYYY-MM, or YYYY-MM-DD. Lexicographic
+    # ordering of the string also orders chronologically.
+    date_published = models.CharField(max_length=10, blank=True, default="")
+    document_type = models.ForeignKey(
+        "DocumentType",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="%(class)s_resources",
+    )
+    document_author_institution = models.ForeignKey(
+        "DocumentAuthorInstitution",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="%(class)s_resources",
+    )
+    institution_type = models.ForeignKey(
+        "InstitutionType",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="%(class)s_resources",
+    )
+
+    publisher = models.CharField(max_length=255, blank=True, default="")
 
     class Meta:
         abstract = True
