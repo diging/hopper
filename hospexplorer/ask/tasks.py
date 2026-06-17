@@ -83,8 +83,11 @@ def _enrich_search_results(content):
             if pdf.file:
                 r["url"] = pdf.file.url
             r["type"] = "PDF"
+            r["publisher"] = pdf.publisher
         elif doc_id in website_doc_ids:
             r["type"] = "Website"
+            website = WebsiteResource.objects.get(mcp_kb_document_id=doc_id)
+            r["publisher"] = website.publisher
         else:
             r["type"] = _infer_type_from_url(r.get("url"))
 

@@ -125,12 +125,21 @@ def poll_query(request, task_id):
     response_data = {"status": task.status}
 
     if task.status == QueryTask.Status.COMPLETED:
-        response_data["message"] = task.result
+        results = json.loads(task.result)
+        results = _process_search_results(results)
+        response_data["message"] = json.dumps(results)
     elif task.status == QueryTask.Status.FAILED:
         response_data["error"] = task.error_message
 
     return JsonResponse(response_data)
 
+
+def _process_search_results(results):
+    """Rearrange search results so that state resources come first."""
+    state_resources = [r for r in results["search_results"] if r.get("publisher", "") == "State"]
+    other_resources = [r for r in results["search_results"] if r.get("publisher", "") != "State"]
+    results["search_results"] = state_resources + other_resources
+    return results
 
 
 @login_required
