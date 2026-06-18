@@ -263,10 +263,7 @@ window.renderChatMessage = function(msg) {
         return div.innerHTML;
     }
 
-    // Turn page-number mentions in already-escaped prose ("page 6", "pages 1-2",
-    // "pages 1, 2 and 5") into links that deep-link to that PDF page via #page=N.
-    // Only the digits become links; connectors (-, comma, "and") are left as text.
-    // Returns the text unchanged when the result has no url to point at.
+    // turn page number mentions in prose into #page=N deep-links
     function linkifyPages(escapedText, url) {
         if (!url || !escapedText) return escapedText;
         var safeUrl = escapeHtml(url);

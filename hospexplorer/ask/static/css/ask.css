@@ -415,9 +415,6 @@ span.search-result-title {
     padding: 1rem 0;
 }
 
-/* Inline page-number deep-links woven into summary/relevance prose.
-   `a.` specificity (0,1,1) ties the global `.chat-bubble-assistant a` rule and
-   wins on source order, so the maroon/weight below actually applies. */
 a.page-ref-link {
     font-style: normal;
     font-weight: 600;
@@ -455,8 +452,6 @@ a.page-ref-link:focus-visible {
     flex-shrink: 0;
 }
 
-/* Footnote-style row: a light page marker + a clamped snippet, no boxes.
-   Stays readable whether a document surfaces 2 pages or 20. */
 .search-result-page {
     display: flex;
     gap: 0.65rem;
@@ -478,7 +473,6 @@ a.page-ref-link:focus-visible {
     color: #8c1d40;
 }
 
-/* outrank the global `.chat-bubble-assistant a` underline; underline only on hover */
 a.search-result-page-num {
     text-decoration: none;
 }
