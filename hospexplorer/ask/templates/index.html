@@ -263,6 +263,21 @@ window.renderChatMessage = function(msg) {
         return div.innerHTML;
     }
 
+    // turn page number mentions in prose into #page=N deep-links
+    function linkifyPages(escapedText, url) {
+        if (!url || !escapedText) return escapedText;
+        var safeUrl = escapeHtml(url);
+        return escapedText.replace(
+            /\b(pages?|pgs?\.?|pp?\.)(\s+\(?)(\d+(?:\s*(?:[-–—]|,|and|&|to)\s*\d+)*)/gi,
+            function(whole, kw, gap, nums) {
+                var linked = nums.replace(/\d+/g, function(n) {
+                    return '<a href="' + safeUrl + '#page=' + n + '" target="_blank" rel="noopener" class="page-ref-link">' + n + '</a>';
+                });
+                return kw + gap + linked;
+            }
+        );
+    }
+
     function resultTypeMeta(r) {
         if (!r.type) return null;
         var modifier = String(r.type).toLowerCase().replace(/[^a-z0-9]+/g, '-');
@@ -282,8 +297,8 @@ window.renderChatMessage = function(msg) {
             var header = '<div class="search-results-header">' + count + ' document' + (count !== 1 ? 's' : '') + ' found</div>';
             var cards = results.map(function(r, i) {
                 var title = escapeHtml(r.title || 'Untitled');
-                var summary = escapeHtml(r.summary || '');
-                var relevance = escapeHtml(r.relevance || '');
+                var summary = linkifyPages(escapeHtml(r.summary || ''), r.url);
+                var relevance = linkifyPages(escapeHtml(r.relevance || ''), r.url);
                 var typeMeta = resultTypeMeta(r);
                 var typeBadge = typeMeta
                     ? '<span class="search-result-type search-result-type-' + escapeHtml(typeMeta.modifier) + '" aria-label="Result type: ' + escapeHtml(typeMeta.label) + '">' + escapeHtml(typeMeta.label) + '</span>'
@@ -303,6 +318,31 @@ window.renderChatMessage = function(msg) {
                 html += '<p class="search-result-summary">' + summary + '</p>';
                 if (relevance) {
                     html += '<p class="search-result-relevance"><strong>Relevance:</strong> ' + relevance + '</p>';
+                }
+                if (Array.isArray(r.pages) && r.pages.length) {
+                    var pagesIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true"><path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5zm-3 0A1.5 1.5 0 0 1 9.5 3V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5z"/><path d="M5 8a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 0 1h-5A.5.5 0 0 1 5 8m0 2a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 0 1h-5a.5.5 0 0 1-.5-.5m0 2a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 0 1h-2a.5.5 0 0 1-.5-.5"/></svg>';
+                    html += '<div class="search-result-pages">';
+                    html += '<div class="search-result-pages-label">' + pagesIcon + 'Relevant pages</div>';
+                    html += r.pages.map(function(p) {
+                        var rawNum = (p.page_number === undefined || p.page_number === null) ? '' : String(p.page_number).trim();
+                        var pageLabel = 'p. ' + escapeHtml(rawNum);
+                        var chunkText = p.chunk || '';
+                        var chunk = escapeHtml(chunkText);
+                        var numHtml;
+                        if (r.url && rawNum) {
+                            var pageHref = r.url + '#page=' + encodeURIComponent(rawNum);
+                            numHtml = '<a href="' + escapeHtml(pageHref) + '" target="_blank" rel="noopener" class="search-result-page-num">' + pageLabel + '</a>';
+                        } else {
+                            numHtml = '<span class="search-result-page-num">' + pageLabel + '</span>';
+                        }
+                        var pageHtml = '<div class="search-result-page">' + numHtml;
+                        if (chunk) {
+                            pageHtml += '<p class="search-result-page-chunk" title="' + escapeHtml(chunkText) + '">' + chunk + '</p>';
+                        }
+                        pageHtml += '</div>';
+                        return pageHtml;
+                    }).join('');
+                    html += '</div>';
                 }
                 html += '</div>';
                 return html;
