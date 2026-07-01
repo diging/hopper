@@ -18,13 +18,17 @@ To run the app, simply execute `uv run python manage.py runserver`. Then go to `
 
 ## Architecture
 
+Hopper talks to two other services: The SIM installation that provides access to the agent and HopperMCP, the MCP server used as a knowledge base. Hopper submits files to HopperMCP to be indexed and executes workflows via SIM to send requests to the agent.  
+
 ```mermaid
 architecture-beta
     service hopper(server)[Hopper]
     service mcp(database)[HopperMCP]
     service sim(cloud)[SIM Agent]
 
-    hopper:L -- R:mcp
-    hopper:R -- B:sim
-    sim:T -- B:mcp
+    hopper:B -- T:mcp
+    hopper:B -- T:sim
+    sim:L -- R:mcp
 ```
+
+
