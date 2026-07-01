@@ -31,4 +31,6 @@ architecture-beta
     sim:L -- R:mcp
 ```
 
+## User Guide
 
+See [USER_GUIDE.md](USER_GUIDE.md)
