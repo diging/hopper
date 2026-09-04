@@ -6,52 +6,144 @@
         <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
         <meta name="description" content="" />
         <meta name="author" content="" />
-        <title>HosP</title>
+        <title>Hopper</title>
         <!-- Favicon-->
-        <link rel="icon" type="image/x-icon" href="assets/favicon.ico" />
+        <link rel="icon" type="image/x-icon" href="{% static 'assets/favicon.ico' %}" />
         <!-- Core theme CSS (includes Bootstrap)-->
         <link href="{% static 'css/styles.css' %}" rel="stylesheet" />
+        <script defer src="https://cdn.jsdelivr.net/npm/@imacrayon/alpine-ajax@0.12.6/dist/cdn.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
         <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     </head>
     <body>
         <div class="d-flex" id="wrapper">
             <!-- Sidebar-->
-            <div class="border-end bg-white" id="sidebar-wrapper">
+            <div class="border-end bg-white d-flex flex-column" id="sidebar-wrapper"
+                 x-data="sidebarConversations()"
+                 @conversation-updated.window="upsertConversation($event.detail)">
                 <div class="sidebar-heading border-bottom bg-white">
-                    <img width="50" src="{% static 'assets/asu.png' %}">
-                    Hopper
+                    <a href="{% url 'ask:index' %}" class="text-decoration-none text-dark d-flex align-items-center">
+                        <img width="50" src="{% static 'assets/asu.png' %}" alt="Hopper Logo">
+                        <span class="ms-1">Hopper</span>
+                    </a>
                 </div>
-                <div class="list-group list-group-flush">
+                <div class="list-group list-group-flush flex-grow-1">
+                    {% if user.is_authenticated %}
+                    <div class="sidebar-section-heading small text-muted px-3 py-2 border-bottom bg-light">
+                        Conversations
+                    </div>
+                    <div class="p-3">
+                        <form method="post" action="{% url 'ask:new-conversation' %}">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-outline-secondary btn-sm w-100">New Chat +</button>
+                        </form>
+                    </div>
+                    {% endif %}
+                    <!-- Conversations Section -->
+
+                    <template x-for="conv in conversations" :key="conv.id">
+                        <a :href="conv.url" class="list-group-item list-group-item-action py-2 px-3 question-item"
+                           :class="{ 'active': conv.id === activeConversationId }"
+                           :title="conv.label"
+                           x-text="conv.label">
+                        </a>
+                    </template>
+                    <div x-show="conversations.length === 0" class="text-muted small px-3 py-2">
+                        No conversations yet
+                    </div>
                 </div>
+                {% if user.is_authenticated %}
+                <div class="border-top p-2">
+                    <a href="{% url 'ask:kb-resources' %}" class="btn btn-outline-secondary btn-sm w-100 text-start">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" class="me-1 mb-1" viewBox="0 0 16 16">
+                            <path d="M1 2.828c.885-.37 2.154-.769 3.388-.893 1.33-.134 2.458.063 3.112.752v9.746c-.935-.53-2.12-.603-3.213-.493-1.18.12-2.37.461-3.287.811V2.828zm7.5-.141c.654-.689 1.782-.886 3.112-.752 1.234.124 2.503.523 3.388.893v9.923c-.918-.35-2.107-.692-3.287-.81-1.094-.111-2.278-.039-3.213.492V2.687zM8 1.783C7.015.936 5.587.81 4.287.94c-1.514.153-3.042.672-3.994 1.105A.5.5 0 0 0 0 2.5v11a.5.5 0 0 0 .707.455c.882-.4 2.303-.881 3.68-1.02 1.409-.142 2.59.087 3.223.877a.5.5 0 0 0 .78 0c.633-.79 1.814-1.019 3.222-.877 1.378.139 2.8.62 3.681 1.02A.5.5 0 0 0 16 13.5v-11a.5.5 0 0 0-.293-.455c-.952-.433-2.48-.952-3.994-1.105C10.413.809 8.985.936 8 1.783z"/>
+                        </svg>
+                        Knowledge Base
+                    </a>
+                    {% if user.is_staff %}
+                    <a href="{% url 'admin:index' %}" target="_blank" rel="noopener" class="btn btn-outline-secondary btn-sm w-100 text-start mt-1">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" class="me-1 mb-1" viewBox="0 0 16 16">
+                            <path d="M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-2.105.872l-.31-.17c-1.283-.698-2.686.705-1.987 1.987l.169.311c.446.82.023 1.841-.872 2.105l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1a1.464 1.464 0 0 1 .872 2.105l-.17.31c-.698 1.283.705 2.686 1.987 1.987l.311-.169a1.464 1.464 0 0 1 2.105.872l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 2.105-.872l.31.17c1.283.698 2.686-.705 1.987-1.987l-.169-.311a1.464 1.464 0 0 1 .872-2.105l.34-.1c1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.872-2.105l.17-.31c.698-1.283-.705-2.686-1.987-1.987l-.311.169a1.464 1.464 0 0 1-2.105-.872l-.1-.34zM8 10.93a2.929 2.929 0 1 1 0-5.86 2.929 2.929 0 0 1 0 5.858z"/>
+                        </svg>
+                        Admin
+                    </a>
+                    {% endif %}
+                </div>
+                {% endif %}
+                {% if user.is_authenticated %}
+                <!-- User profile at bottom -->
+                <div class="border-top p-3 mt-auto dropup">
+                    <a href="#" class="d-flex align-items-center text-decoration-none"
+                       data-bs-toggle="dropdown" aria-expanded="false" id="userProfileDropdown">
+                        <div style="width: 36px; height: 36px; border-radius: 50%; background-color: rgb(140, 29, 64); color: white; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 0.9rem; flex-shrink: 0;">
+                            {{ user.username|make_list|first|upper }}
+                        </div>
+                        <span class="ms-2 text-dark" style="font-size: 0.9rem; font-weight: 500;">{{ user.username }}</span>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="ms-auto text-muted" viewBox="0 0 16 16">
+                            <path fill-rule="evenodd" d="M7.646 4.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1-.708.708L8 5.707l-5.646 5.647a.5.5 0 0 1-.708-.708l6-6z"/>
+                        </svg>
+                    </a>
+                    <ul class="dropdown-menu shadow-sm w-100" aria-labelledby="userProfileDropdown">
+                        <li>
+                            <a class="dropdown-item" href="{% url 'ask:terms-view' %}">
+                                Terms of Use
+                                {% if terms_accepted %}
+                                <span class="badge bg-success ms-1" style="font-size: 0.65em;">Accepted</span>
+                                {% endif %}
+                            </a>
+                        </li>
+                        <li>
+                            <button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#deleteHistoryModal">
+                                Delete All Conversations
+                            </button>
+                        </li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="{% url 'account_logout' %}">Sign Out</a></li>
+                    </ul>
+                </div>
+                {% endif %}
             </div>
             <!-- Page content wrapper-->
             <div id="page-content-wrapper">
-                <!-- Top navigation-->
-                <!--<nav class="navbar navbar-expand-lg navbar-light bg-white border-bottom">
-                    <div class="container-fluid">
-                        <button class="btn btn-primary" id="sidebarToggle">Toggle Menu</button>
-                        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation"><span class="navbar-toggler-icon"></span></button>
-                        <div class="collapse navbar-collapse" id="navbarSupportedContent">
-                            <ul class="navbar-nav ms-auto mt-2 mt-lg-0">
-                                <li class="nav-item active"><a class="nav-link" href="#!">Home</a></li>
-                                <li class="nav-item"><a class="nav-link" href="#!">Link</a></li>
-                                <li class="nav-item dropdown">
-                                    <a class="nav-link dropdown-toggle" id="navbarDropdown" href="#" role="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Dropdown</a>
-                                    <div class="dropdown-menu dropdown-menu-end" aria-labelledby="navbarDropdown">
-                                        <a class="dropdown-item" href="#!">Action</a>
-                                        <a class="dropdown-item" href="#!">Another action</a>
-                                        <div class="dropdown-divider"></div>
-                                        <a class="dropdown-item" href="#!">Something else here</a>
-                                    </div>
-                                </li>
-                            </ul>
-                        </div>
-                    </div>
-                </nav>-->
                 <!-- Page content-->
                 <div class="container-fluid">
+                    {% if messages %}
+                    {% for message in messages %}
+                    <div class="alert alert-{{ message.tags }} alert-dismissible fade show mt-3" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                    {% endfor %}
+                    {% endif %}
                     {% block content %}{% endblock %}
-                
+
+                </div>
+            </div>
+        </div>
+        <!-- Delete History Confirmation Modal -->
+        <div class="modal fade" id="deleteHistoryModal" tabindex="-1" aria-labelledby="deleteHistoryModalLabel" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="deleteHistoryModalLabel">Delete All Conversations</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        Are you sure you want to delete all your conversations? This action is irreversible.
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">No</button>
+                        <button type="button" class="btn text-white" style="background-color: #8C1D40;" id="confirmDeleteHistory">Delete</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Toast container -->
+        <div class="toast-container position-fixed bottom-0 end-0 p-3">
+            <div id="errorToast" class="toast align-items-center text-bg-danger border-0" role="alert" aria-live="assertive" aria-atomic="true">
+                <div class="d-flex">
+                    <div class="toast-body" id="errorToastBody"></div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
                 </div>
             </div>
         </div>
@@ -59,5 +151,64 @@
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
         <!-- Core theme JS-->
         <script src="{% static 'js/scripts.js' %}"></script>
+        <script>
+            function showErrorToast(message) {
+                document.getElementById('errorToastBody').textContent = message;
+                const toast = new bootstrap.Toast(document.getElementById('errorToast'));
+                toast.show();
+            }
+
+            document.getElementById('confirmDeleteHistory').addEventListener('click', async function () {
+                const btn = this;
+                btn.disabled = true;
+                btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Deleting...';
+                const csrfToken = '{{ csrf_token }}';
+                try {
+                    const response = await fetch('{% url "ask:delete-history" %}', {
+                        method: 'DELETE',
+                        headers: { 'X-CSRFToken': csrfToken },
+                    });
+                    if (response.ok) {
+                        window.location.href = '{% url "ask:index" %}';
+                        return;
+                    }
+                    showErrorToast('Something went wrong. Please try again.');
+                } catch (error) {
+                    console.error('Failed to delete conversation history:', error);
+                    showErrorToast('Something went wrong. Please try again.');
+                }
+                btn.disabled = false;
+                btn.textContent = 'Delete';
+            });
+        </script>
+        <!-- Sidebar Conversations Component -->
+        {{ sidebar_conversations|json_script:"sidebar-conversations-data" }}
+        <script>
+            window.initialConversations = JSON.parse(
+                document.getElementById('sidebar-conversations-data').textContent
+            );
+
+            function sidebarConversations() {
+                return {
+                    conversations: window.initialConversations || [],
+                    activeConversationId: {{ conversation.id|default:"null" }},
+                    maxItems: {{ sidebar_conversations_limit|default:"10" }},
+
+                    upsertConversation(detail) {
+                        this.conversations = this.conversations.filter(c => c.id !== detail.id);
+                        this.conversations.unshift({
+                            id: detail.id,
+                            label: detail.label,
+                            url: detail.url,
+                        });
+                        // 10 conversations shown in the sidebar
+                        if (this.conversations.length > this.maxItems) {
+                            this.conversations = this.conversations.slice(0, this.maxItems);
+                        }
+                        this.activeConversationId = detail.id;
+                    }
+                };
+            }
+        </script>
     </body>
 </html>

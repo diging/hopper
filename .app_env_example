@@ -1,0 +1,32 @@
+# LLM Configuration
+
+# Replace with real server URL for production
+export LLM_HOST=http://mock:3000/
+
+# This is only a fall back for when no active workflow is set in Sim Workflows through the admin
+# Once you have set an active workflow, this will not be used
+export LLM_TOKEN=your-token
+export LLM_MAX_TOKENS=4096
+
+# Postgres Database Configuration
+export POSTGRES_NAME=postgres
+export POSTGRES_USER=postgres
+export POSTGRES_PASSWORD=postgres
+
+export APP_ROOT = hopper/
+
+# MCP Knowledge Base Configuration
+# Do not end with a trailing slash "/"
+export KB_MCP_HOST=http://host.docker.internal:8002
+export KB_MCP_JWT_TOKEN=your-jwt-token  # JWT token from OIDC token endpoint
+
+# JWT config
+export IDP_OIDC_PRIVATE_KEY="-----BEGIN PRIVATE KEY----- \
+<paste key here> \
+-----END PRIVATE KEY----- \
+"
+
+# MCP Knowledge Base Configuration
+export KB_MCP_HOST=http://localhost:8002
+export KB_MCP_JWT_TOKEN=your-jwt-token
+export KB_MCP_TIMEOUT=30

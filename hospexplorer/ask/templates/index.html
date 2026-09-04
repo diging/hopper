@@ -2,42 +2,362 @@
 {% load static %}
 
 {% block content %}
-    <h1 class="mt-4">Hopper</h1>
-    <p></p>
-    <!--<p>
-        Make sure to keep all page content within the
-        <code>#page-content-wrapper</code>
-        . The top navbar is optional, and just for demonstration. Just create an element with the
-        <code>#sidebarToggle</code>
-        ID which will toggle the menu when clicked.
-    </p>-->
+    <link rel="stylesheet" href="{% static 'css/ask.css' %}">
     <div
         x-data="{
-            answers: [],
+            userQuery: '',
+            messages: [
+                {% if conversation %}
+                    {% for qa in conversation.qa_records.all reversed %}
+                        { role: 'user', content: '{{ qa.question_text|escapejs }}' },
+                        {% if qa.answer_text %}
+                            { role: 'assistant', content: '{{ qa.answer_text|escapejs }}' },
+                        {% endif %}
+                    {% endfor %}
+                {% endif %}
+            ],
+            conversationId: '{{ conversation.id|default_if_none:'' }}',
+            isLoading: false,
+            pollInterval: null,
+            showScrollBtn: false,
+            glossaryOpen: false,
+
+            renderMessage(msg) {
+                return window.renderChatMessage(msg);
+            },
+
+            get userQuestions() {
+                return this.messages
+                    .map((msg, index) => ({ ...msg, index }))
+                    .filter(msg => msg.role === 'user')
+                    .reverse();
+            },
+
+            scrollToQuestion(index) {
+                const el = document.getElementById('msg-' + index);
+                if (!el) return;
+                this.glossaryOpen = false;
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                el.classList.add('msg-highlight');
+                setTimeout(() => el.classList.remove('msg-highlight'), 1500);
+            },
 
             async getAnswer() {
-                this.answer = await (await fetch('{% url 'query-llm' %}?query=Tell me a story')).json();
-                
-                // log out all the posts to the console
-                this.answers.push(this.answer.message)
+                if (!this.userQuery.trim()) return;
+
+                const question = this.userQuery.trim();
+                this.userQuery = '';
+
+                this.messages.push({ role: 'user', content: question });
+                this.$nextTick(() => this.scrollToBottom());
+
+                this.isLoading = true;
+
+                try {
+                    const response = await fetch('{% url "ask:query-llm" %}', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': '{{ csrf_token }}',
+                        },
+                        body: JSON.stringify({
+                            query: question,
+                            conversation_id: this.conversationId || null,
+                        }),
+                    });
+                    const data = await response.json();
+
+                    if (!response.ok || data.error) {
+                        this.messages.push({ role: 'assistant', content: data.error || 'Something went wrong. Please try again.' });
+                        this.isLoading = false;
+                        this.$nextTick(() => this.scrollToBottom());
+                        return;
+                    }
+
+                    // Update conversation ID and URL immediately
+                    if (data.conversation_id && !this.conversationId) {
+                        this.conversationId = data.conversation_id;
+                        history.pushState({}, '', '{% url "ask:index" %}c/' + data.conversation_id + '/');
+                    }
+                    if (data.conversation_id) {
+                        $dispatch('conversation-updated', {
+                            id: data.conversation_id,
+                            label: data.conversation_title || question,
+                            url: '{% url "ask:index" %}c/' + data.conversation_id + '/',
+                        });
+                    }
+
+                    // Start polling for the LLM result
+                    this.pollForResult(data.task_id);
+                } catch (error) {
+                    this.messages.push({ role: 'assistant', content: 'Something went wrong. Please try again.' });
+                    this.isLoading = false;
+                    this.$nextTick(() => this.scrollToBottom());
+                }
+            },
+
+            pollForResult(taskId) {
+                const pollUrl = '{% url "ask:index" %}poll/' + taskId + '/';
+                this.pollInterval = setInterval(async () => {
+                    try {
+                        const response = await fetch(pollUrl);
+                        const data = await response.json();
+
+                        if (data.status === 'completed') {
+                            clearInterval(this.pollInterval);
+                            this.pollInterval = null;
+                            this.messages.push({ role: 'assistant', content: data.message });
+                            this.isLoading = false;
+                            this.$nextTick(() => this.scrollToBottom());
+                        } else if (data.status === 'failed') {
+                            clearInterval(this.pollInterval);
+                            this.pollInterval = null;
+                            this.messages.push({ role: 'assistant', content: data.error || 'Something went wrong. Please try again.' });
+                            this.isLoading = false;
+                            this.$nextTick(() => this.scrollToBottom());
+                        }
+                        // pending/processing: keep polling
+                    } catch (error) {
+                        clearInterval(this.pollInterval);
+                        this.pollInterval = null;
+                        this.messages.push({ role: 'assistant', content: 'Something went wrong. Please try again.' });
+                        this.isLoading = false;
+                        this.$nextTick(() => this.scrollToBottom());
+                    }
+                }, 1500);
+            },
+
+            // Smoothly scrolls chat to the latest message
+            scrollToBottom() {
+                const c = this.$refs.chatContainer;
+                if (c) c.scrollTop = c.scrollHeight;
+            },
+
+            // Shows the scroll-down button when user has scrolled more than 150px from bottom
+            checkScroll() {
+                const c = this.$refs.chatContainer;
+                if (!c) return;
+                this.showScrollBtn = (c.scrollHeight - c.scrollTop - c.clientHeight) > 150;
             }
-        }">
-        
-        <div class="input-group mb-3">
-            <input type="text" class="form-control" placeholder="Ask me something!" aria-label="Recipient’s username" aria-describedby="button-addon2" @keyup.enter="getAnswer()">
-            <button type="button" class="btn btn-outline-secondary" id="button-addon2" @click="getAnswer()">Go!</button>
+        }"
+        class="chat-wrapper"
+    >
+        <!-- Chat header -->
+        <div class="chat-header">
+            <h3 class="mb-0 mt-3">Hopper</h3>
+            <button
+                x-show="userQuestions.length > 0"
+                class="glossary-toggle-btn ms-auto"
+                @click.stop="glossaryOpen = !glossaryOpen"
+                title="Question History"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+                    <path fill-rule="evenodd" d="M5 11.5a.5.5 0 0 1 .5-.5h9a.5.5 0 0 1 0 1h-9a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h9a.5.5 0 0 1 0 1h-9a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h9a.5.5 0 0 1 0 1h-9a.5.5 0 0 1-.5-.5m-3 1a1 1 0 1 0 0-2 1 1 0 0 0 0 2m0 4a1 1 0 1 0 0-2 1 1 0 0 0 0 2m0 4a1 1 0 1 0 0-2 1 1 0 0 0 0 2"/>
+                </svg>
+            </button>
         </div>
-        <div class="d-flex" style="height:100%;">
-            <div class="vr" style="margin-right: 30px;"></div> 
-            <ul class="list-group responses" style="width: 100%">
-            <template x-for="(answer, index) in answers" :key="index">
-                <li class="list-group-item" x-text="answer"></li>
+
+        <!-- Chat area -->
+        <div class="chat-container" x-ref="chatContainer" @scroll="checkScroll()">
+
+            <!-- Welcome state -->
+            <div x-show="messages.length === 0" class="chat-welcome">
+                <div class="chat-welcome-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="currentColor" viewBox="0 0 16 16">
+                        <path d="M5 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm4 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm3 1a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"/>
+                        <path d="m2.165 15.803.02-.004c1.83-.363 2.948-.842 3.468-1.105A9.06 9.06 0 0 0 8 15c4.418 0 8-3.134 8-7s-3.582-7-8-7-8 3.134-8 7c0 1.76.743 3.37 1.97 4.6a10.437 10.437 0 0 1-.524 2.318l-.003.011a10.722 10.722 0 0 1-.244.637c-.079.186.074.394.272.362a21.673 21.673 0 0 0 .693-.125zm.8-3.108a1 1 0 0 0-.287-.801C1.618 10.83 1 9.468 1 8c0-3.192 3.004-6 7-6s7 2.808 7 6c0 3.192-3.004 6-7 6a8.06 8.06 0 0 1-2.088-.272 1 1 0 0 0-.711.074c-.387.196-1.24.57-2.634.893a10.97 10.97 0 0 0 .398-2z"/>
+                    </svg>
+                </div>
+                <h4>How can I help you today?</h4>
+                <p class="text-muted">Ask me anything about hospital data.</p>
+            </div>
+
+            <!-- Message list -->
+            <template x-for="(msg, index) in messages" :key="index">
+                <div :id="'msg-' + index" :class="'chat-message chat-message-' + msg.role">
+                    <div class="chat-avatar" x-text="msg.role === 'user' ? 'You' : 'AI'"></div>
+                    <div class="chat-bubble"
+                         :class="'chat-bubble-' + msg.role"
+                         x-html="renderMessage(msg)">
+                    </div>
+                </div>
             </template>
-            </ul>
+
+            <!-- Loading indicator -->
+            <div x-show="isLoading" class="chat-message chat-message-assistant">
+                <div class="chat-avatar">AI</div>
+                <div class="chat-bubble chat-bubble-assistant">
+                    <span class="thinking-dots">Thinking</span>
+                </div>
+            </div>
         </div>
-        <div>
-    
+
+        <!-- Scroll to bottom button -->
+        <button
+            x-show="showScrollBtn"
+            x-transition
+            class="scroll-down-btn"
+            @click="scrollToBottom()"
+        >
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+                <path fill-rule="evenodd" d="M8 1a.5.5 0 0 1 .5.5v11.793l3.146-3.147a.5.5 0 0 1 .708.708l-4 4a.5.5 0 0 1-.708 0l-4-4a.5.5 0 0 1 .708-.708L7.5 13.293V1.5A.5.5 0 0 1 8 1z"/>
+            </svg>
+        </button>
+
+        <!-- Question glossary sidebar -->
+        <div class="glossary-sidebar" x-show="glossaryOpen" x-transition.opacity @click.outside="glossaryOpen = false">
+            <div class="glossary-header">
+                <div class="glossary-title">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="glossary-title-icon" viewBox="0 0 16 16">
+                        <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/>
+                        <path d="M5.255 5.786a.237.237 0 0 0 .241.247h.825c.138 0 .248-.113.266-.25.09-.656.54-1.134 1.342-1.134.686 0 1.314.343 1.314 1.168 0 .635-.374.927-.965 1.371-.673.489-1.206 1.06-1.168 1.987l.003.217a.25.25 0 0 0 .25.246h.811a.25.25 0 0 0 .25-.25v-.105c0-.718.273-.927 1.01-1.486.609-.463 1.244-.977 1.244-2.056 0-1.511-1.276-2.241-2.673-2.241-1.267 0-2.655.59-2.75 2.286m1.557 5.763c0 .533.425.927 1.01.927.609 0 1.028-.394 1.028-.927 0-.552-.42-.94-1.029-.94-.584 0-1.009.388-1.009.94"/>
+                    </svg>
+                    <div>
+                        <h6 class="mb-0">Question History</h6>
+                        <span class="glossary-subtitle">Click to jump to a question</span>
+                    </div>
+                </div>
+                <button class="glossary-close-btn" @click="glossaryOpen = false">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                        <path d="M2.146 2.854a.5.5 0 1 1 .708-.708L8 7.293l5.146-5.147a.5.5 0 0 1 .708.708L8.707 8l5.147 5.146a.5.5 0 0 1-.708.708L8 8.707l-5.146 5.147a.5.5 0 0 1-.708-.708L7.293 8z"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="glossary-list">
+                <template x-for="q in userQuestions" :key="q.index">
+                    <button class="glossary-item" @click="scrollToQuestion(q.index)" x-text="q.content"></button>
+                </template>
+            </div>
+        </div>
+
+        <!-- Input bar -->
+        <div class="chat-input-bar">
+            <div class="chat-input-wrapper">
+                <input
+                    type="text"
+                    class="chat-input"
+                    placeholder="Ask me something..."
+                    x-model="userQuery"
+                    @keyup.enter="getAnswer()"
+                    :disabled="isLoading"
+                >
+                <button
+                    class="chat-send-btn"
+                    @click="getAnswer()"
+                    :disabled="isLoading || !userQuery.trim()"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+                        <path d="M15.854.146a.5.5 0 0 1 .11.54l-5.819 14.547a.75.75 0 0 1-1.329.124l-3.178-4.995L.643 7.184a.75.75 0 0 1 .124-1.33L15.314.037a.5.5 0 0 1 .54.11ZM6.636 10.07l2.761 4.338L14.13 2.576 6.636 10.07Zm6.787-8.201L1.591 6.602l4.339 2.76 7.494-7.493Z"/>
+                    </svg>
+                </button>
+            </div>
         </div>
     </div>
+<script>
+// tries to parse content as JSON with search_results and renders document cards
+// Falls back to markdown rendering (via marked.parse) for older conversations or non JSON responses
+window.renderChatMessage = function(msg) {
+    function escapeHtml(text) {
+        var div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // turn page number mentions in prose into #page=N deep-links
+    function linkifyPages(escapedText, url) {
+        if (!url || !escapedText) return escapedText;
+        var safeUrl = escapeHtml(url);
+        return escapedText.replace(
+            /\b(pages?|pgs?\.?|pp?\.)(\s+\(?)(\d+(?:\s*(?:[-–—]|,|and|&|to)\s*\d+)*)/gi,
+            function(whole, kw, gap, nums) {
+                var linked = nums.replace(/\d+/g, function(n) {
+                    return '<a href="' + safeUrl + '#page=' + n + '" target="_blank" rel="noopener" class="page-ref-link">' + n + '</a>';
+                });
+                return kw + gap + linked;
+            }
+        );
+    }
+
+    function resultTypeMeta(r) {
+        if (!r.type) return null;
+        var modifier = String(r.type).toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        return { label: r.type, modifier: modifier };
+    }
+
+    if (msg.role === 'user') return escapeHtml(msg.content);
+
+    try {
+        var parsed = JSON.parse(msg.content.trim());
+        if (parsed && Array.isArray(parsed.search_results)) {
+            var results = parsed.search_results;
+            if (results.length === 0) {
+                return '<p class="search-no-results">No documents were found.</p>';
+            }
+            var count = results.length;
+            var header = '<div class="search-results-header">' + count + ' document' + (count !== 1 ? 's' : '') + ' found</div>';
+            var cards = results.map(function(r, i) {
+                var title = escapeHtml(r.title || 'Untitled');
+                var summary = linkifyPages(escapeHtml(r.summary || ''), r.url);
+                var relevance = linkifyPages(escapeHtml(r.relevance || ''), r.url);
+                var typeMeta = resultTypeMeta(r);
+                var typeBadge = typeMeta
+                    ? '<span class="search-result-type search-result-type-' + escapeHtml(typeMeta.modifier) + '" aria-label="Result type: ' + escapeHtml(typeMeta.label) + '">' + escapeHtml(typeMeta.label) + '</span>'
+                    : '';
+                var titleHtml = r.url
+                    ? '<a href="' + escapeHtml(r.url) + '" target="_blank" rel="noopener" class="search-result-title">' + title + '</a>'
+                    : '<span class="search-result-title">' + title + '</span>';
+                var html = '<div class="search-result">';
+                html += '<div class="search-result-meta">';
+                html += '<span class="search-result-number">Result ' + (i + 1) + '</span>';
+                html += typeBadge;
+                html += '</div>';
+                html += titleHtml;
+                if (r.publisher) {
+                    html += '<p class="search-result-publisher"><strong>Publisher:</strong> ' + escapeHtml(r.publisher) + '</p>';
+                }
+                html += '<p class="search-result-summary">' + summary + '</p>';
+                if (relevance) {
+                    html += '<p class="search-result-relevance"><strong>Relevance:</strong> ' + relevance + '</p>';
+                }
+                if (Array.isArray(r.pages) && r.pages.length) {
+                    var pagesIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true"><path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5zm-3 0A1.5 1.5 0 0 1 9.5 3V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5z"/><path d="M5 8a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 0 1h-5A.5.5 0 0 1 5 8m0 2a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 0 1h-5a.5.5 0 0 1-.5-.5m0 2a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 0 1h-2a.5.5 0 0 1-.5-.5"/></svg>';
+                    html += '<div class="search-result-pages">';
+                    html += '<div class="search-result-pages-label">' + pagesIcon + 'Relevant pages</div>';
+                    html += r.pages.map(function(p) {
+                        var rawNum = (p.page_number === undefined || p.page_number === null) ? '' : String(p.page_number).trim();
+                        var pageLabel = 'p. ' + escapeHtml(rawNum);
+                        var chunkText = p.chunk || '';
+                        var chunk = escapeHtml(chunkText);
+                        var numHtml;
+                        if (r.url && rawNum) {
+                            var pageHref = r.url + '#page=' + encodeURIComponent(rawNum);
+                            numHtml = '<a href="' + escapeHtml(pageHref) + '" target="_blank" rel="noopener" class="search-result-page-num">' + pageLabel + '</a>';
+                        } else {
+                            numHtml = '<span class="search-result-page-num">' + pageLabel + '</span>';
+                        }
+                        var pageHtml = '<div class="search-result-page">' + numHtml;
+                        if (chunk) {
+                            pageHtml += '<p class="search-result-page-chunk" title="' + escapeHtml(chunkText) + '">' + chunk + '</p>';
+                        }
+                        pageHtml += '</div>';
+                        return pageHtml;
+                    }).join('');
+                    html += '</div>';
+                }
+                html += '</div>';
+                return html;
+            }).join('');
+            return header + cards;
+        }
+    } catch (e) {
+        // If no JSON, fall back to markdown rendering
+    }
+    var renderer = new marked.Renderer();
+    renderer.link = function({ href, title, text }) {
+        var titleAttr = title ? ' title="' + title + '"' : '';
+        return '<a href="' + href + '"' + titleAttr + ' target="_blank" rel="noopener">' + text + '</a>';
+    };
+    return marked.parse(msg.content, { renderer: renderer });
+};
+</script>
 {% endblock %}
-                

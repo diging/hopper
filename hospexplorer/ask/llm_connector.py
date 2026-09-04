@@ -1,26 +1,36 @@
-import requests
+import httpx
 from django.conf import settings
+from ask.models import SimWorkflow
 
-def query_llm(query):
+
+def _get_endpoint():
+    active = SimWorkflow.get_active(SimWorkflow.WorkflowType.AGENT)
+    if active and active.agent_endpoint:
+        return active.agent_endpoint
+    # if there are no active workflows, use the LLM_HOST from the settings as fallback
+    return settings.LLM_HOST
+
+
+def query_llm(query, llm_conversation_id=None):  # llm_conversation_id is the UUID, not the integer PK
     headers = {
-        "Authorization": f"Bearer {settings.LLM_TOKEN}",
+        "X-API-Key": settings.LLM_TOKEN,
         "Content-Type": "application/json",
     }
 
     payload = {
-        "model": settings.LLM_MODEL,
-        "messages": [
-            {
-                "role": "user",
-                "content": query
-            }
-        ],
-        "temperature": 0.7,
-        "max_tokens": 1000
+        "input": query,
+        "conversationId": str(llm_conversation_id),
     }
 
-    response = requests.post(settings.LLM_HOST + settings.LLM_QUERY_ENDPOINT, json=payload, headers=headers, timeout=60)
+    endpoint = _get_endpoint()
 
-    response.raise_for_status()  # raises on 4xx/5xx
-    print(response)
+    with httpx.Client() as client:
+        response = client.post(
+            endpoint,
+            json=payload,
+            headers=headers,
+            timeout=settings.LLM_TIMEOUT
+        )
+
+    response.raise_for_status()
     return response.json()

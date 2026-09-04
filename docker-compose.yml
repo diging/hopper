@@ -1,11 +1,36 @@
 version: "3.9"
-   
+
 services:
+  db:
+    image: postgres:16
+    platform: linux/amd64
+    env_file:
+      - .docker-env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  mock:
+    image: mockoon/cli
+    platform: linux/amd64
+    command: ["--data", "/mockoon"]
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./mockoon/llm-mock.json:/mockoon
+
   web:
-      build: .
-      platform: linux/amd64
-      volumes:
-        - .:/usr/src/app
-      ports:
-        - "8000:8000"
-      
+    build: .
+    platform: linux/amd64
+    env_file:
+      - .app_env
+      - .docker-env
+    volumes:
+      - .:/usr/src/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - mock
+
+volumes:
+  postgres_data:

@@ -1,0 +1,27 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% trans 'Home' %}</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+  &rsaquo; <a href="{{ changelist_url }}">{{ opts.verbose_name_plural|capfirst }}</a>
+  &rsaquo; {% trans 'Import CSV' %}
+</div>
+{% endblock %}
+
+{% block content %}
+<form method="post" enctype="multipart/form-data">
+  {% csrf_token %}
+  <p>
+    Upload a one-column CSV. The first column is treated as the
+    <code>name</code>. A leading header row of <code>name</code> is allowed
+    and will be skipped. Duplicate names are skipped silently.
+  </p>
+  <p><input type="file" name="csv_file" accept=".csv" required></p>
+  <div class="submit-row">
+    <input type="submit" value="{% trans 'Import' %}" class="default">
+    <a href="{{ changelist_url }}" class="button cancel-link">{% trans 'Cancel' %}</a>
+  </div>
+</form>
+{% endblock %}

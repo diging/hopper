@@ -20,11 +20,19 @@ from django.urls import path
 from django.urls import include, path
 from django.conf.urls.static import static
 from django.conf import settings
+from allauth.account.views import LoginView
+from ask import views as ask_views
 
 
 
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
-    path("ask/", include("ask.urls")),
-] + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT) # TODO: set up for prod/dev
+    path(settings.APP_ROOT, include([
+        path("", LoginView.as_view(), name="home"),
+        path("", include("allauth.idp.urls")),
+        path("admin/", admin.site.urls),
+        path("accounts/", include("allauth.urls")),
+        path("ask/", include("ask.urls")),
+        path("media/kb_pdfs/<filename>", ask_views.get_pdf, name="get_pdf"),
+    ]))
+] + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT) + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)  # TODO: set up for prod/dev

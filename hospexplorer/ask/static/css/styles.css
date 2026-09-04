@@ -65,7 +65,7 @@
   --bs-body-bg: #fff;
   --bs-border-width: 1px;
   --bs-border-style: solid;
-  --bs-border-color: rgb(197, 66, 130);
+  --bs-border-color: #8C1D40;
   --bs-border-color-translucent: rgba(0, 0, 0, 0.175);
   --bs-border-radius: 0.375rem;
   --bs-border-radius-sm: 0.25rem;
@@ -2006,7 +2006,7 @@ progress {
           appearance: none;
   border-radius: 0.375rem;
   transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
-    border-color: rgb(197, 66, 130);
+    border-color: #8C1D40;
 }
 @media (prefers-reduced-motion: reduce) {
   .form-control {
@@ -2774,7 +2774,7 @@ textarea.form-control-lg {
   --bs-btn-font-weight: 400;
   --bs-btn-line-height: 1.5;
   --bs-btn-color: #212529;
-  --bs-btn-bg: #C54282;
+  --bs-btn-bg: #8C1D40;
   --bs-btn-border-width: 1px;
   --bs-btn-border-color: transparent;
   --bs-btn-border-radius: 0.375rem;
@@ -10833,6 +10833,8 @@ textarea.form-control-lg {
 }
 #wrapper {
   overflow-x: hidden;
+  height: 100vh;
+  overflow-y: hidden;
 }
 
 #sidebar-wrapper {
@@ -10852,6 +10854,9 @@ textarea.form-control-lg {
 
 #page-content-wrapper {
   min-width: 100vw;
+  overflow-x: hidden;
+  overflow-y: auto;
+  height: 100vh;
 }
 
 body.sb-sidenav-toggled #wrapper #sidebar-wrapper {
@@ -10869,4 +10874,46 @@ body.sb-sidenav-toggled #wrapper #sidebar-wrapper {
   body.sb-sidenav-toggled #wrapper #sidebar-wrapper {
     margin-left: -15rem;
   }
+}
+
+/* Recent Questions Sidebar Styles */
+#sidebar-wrapper {
+  display: flex;
+  flex-direction: column;
+}
+
+#sidebar-wrapper .list-group {
+  flex: 1;
+  overflow-y: auto;
+  max-height: calc(100vh - 180px);
+}
+
+#sidebar-wrapper .question-item {
+  font-size: 0.875rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-left: 3px solid transparent;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+#sidebar-wrapper .question-item:hover {
+  border-left-color: #8c1d40;
+  background-color: #f8f9fa;
+}
+
+#sidebar-wrapper .question-item.active {
+  border-left-color: #8c1d40;
+  background-color: rgba(140, 29, 64, 0.1);
+  color: #8c1d40;
+  font-weight: 600;
+  border-color: transparent;
+  border-left: 3px solid #8c1d40;
+}
+
+#sidebar-wrapper .sidebar-section-heading {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.75rem;
 }

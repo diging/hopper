@@ -1,0 +1,22 @@
+{% extends "account/_base_auth.html" %}
+{% load static %}
+
+{% block content %}
+<div class="col-11 col-md-6 col-lg-4">
+    <div class="card" style="border-color: #8C1D40; border-width: 2px;">
+        <div class="card-body p-4 text-center">
+            <img width="60" src="{% static 'assets/asu.png' %}" alt="Hopper Logo" class="mb-3">
+            <h3 class="card-title mb-3">Sign Out</h3>
+            <p class="text-muted mb-4">Are you sure you want to sign out?</p>
+
+            <form method="post" action="{% url 'account_logout' %}">
+                {% csrf_token %}
+                <div class="d-grid gap-2">
+                    <button type="submit" class="btn btn-lg" style="background-color: #8C1D40; border-color: #8C1D40; color: white;">Sign Out</button>
+                    <a href="{% url 'ask:index' %}" class="btn btn-outline-secondary">Cancel</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

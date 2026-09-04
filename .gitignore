@@ -6,8 +6,36 @@ dist/
 wheels/
 *.egg-info
 
+# Django cache
+cache/
+logs/*.log
+
+# Django generated statics
+staticfiles
+
+# Django generated media
+media/
+
 # Virtual environments
 .venv
 
-# secrets
+# Docker production data
+data/db/
+data/files/
+
+# Environment variables
 .app_env
+.docker-env
+.env
+.app_env~
+.docker-env~
+.env~
+
+#db
+db.sqlite3
+
+# logs
+logs/
+
+# other
+private_key.pem

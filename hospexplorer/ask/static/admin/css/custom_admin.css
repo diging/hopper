@@ -1,0 +1,52 @@
+:root {
+    --primary: #8C1D40;
+    --accent: #6b1632;
+    --secondary: #6c757d;
+
+    --header-color: #ffffff;
+    --header-bg: #8C1D40;
+    --header-link-color: #ffffff;
+
+    --breadcrumbs-fg: #ffffff;
+    --breadcrumbs-link-fg: #f4c2cf;
+    --breadcrumbs-bg: #6b1632;
+
+    --link-fg: #8C1D40;
+    --link-hover-color: #6b1632;
+    --link-selected-fg: #6b1632;
+
+    --hairline-color: #dee2e6;
+    --border-color: #dee2e6;
+
+    --body-bg: #f8f9fa;
+    --body-fg: #212529;
+    --body-quiet-color: #6c757d;
+    --body-loud-color: #212529;
+
+    --darkened-bg: #e9ecef;
+    --selected-bg: #f9e8ed;
+    --selected-row: #f9e8ed;
+
+    --button-fg: #ffffff;
+    --button-bg: #8C1D40;
+    --button-hover-bg: #6b1632;
+    --default-button-bg: #8C1D40;
+    --default-button-hover-bg: #6b1632;
+
+    --close-button-bg: #adb5bd;
+    --close-button-hover-bg: #6c757d;
+    --delete-button-bg: #dc3545;
+
+    --object-tools-fg: #ffffff;
+    --object-tools-bg: #8C1D40;
+    --object-tools-hover-bg: #6b1632;
+
+    --message-success-bg: #dff0d8;
+    --message-warning-bg: #fcf8e3;
+    --message-error-bg: #f2dede;
+}
+
+#site-name a {
+    /* !important ensures it overrides Django's default admin specificity. */
+    color: #ffffff !important;
+}

@@ -24,21 +24,37 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = "django-insecure-rv2+&je+)buijn16c$ps^$d50)hl)0$5sq(z&47ixn1@kmi%@("
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DEBUG', 'True')
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = os.getenv("DJANGO_ALLOWED_HOSTS", "localhost").split(",")
+CSRF_TRUSTED_ORIGINS = os.getenv("CSRF_TRUSTED_ORIGINS", "http://localhost/").split(",")
 
 
 # Application definition
 
 INSTALLED_APPS = [
+    # Project apps (before django.contrib.admin so template overrides take effect)
+    "ask",
+
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "ask"
+    "django.contrib.sites",
+    
+    # Allauth
+    "allauth",
+    "allauth.account",
+    "allauth.idp.oidc",
+]
+
+SITE_ID = 1
+
+AUTHENTICATION_BACKENDS = [
+    "django.contrib.auth.backends.ModelBackend",
+    "allauth.account.auth_backends.AuthenticationBackend",
 ]
 
 MIDDLEWARE = [
@@ -47,6 +63,8 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "allauth.account.middleware.AccountMiddleware",
+    "ask.middleware.terms_middleware.TermsAcceptanceMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -63,6 +81,8 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "ask.context_processors.sidebar_conversations",
+                "ask.context_processors.terms_status",
             ],
         },
     },
@@ -75,9 +95,16 @@ WSGI_APPLICATION = "hospexplorer.wsgi.application"
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
 DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql_psycopg2',
+        'NAME': os.environ.get('POSTGRES_NAME'),
+        'USER': os.environ.get('POSTGRES_USER'),
+        'PASSWORD': os.environ.get('POSTGRES_PASSWORD'),
+        'HOST': 'db',
+        'PORT': '5432',
+        'OPTIONS': {
+            'options': '-c timezone=UTC',
+        },
     }
 }
 
@@ -100,6 +127,11 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
+IDP_OIDC_PRIVATE_KEY = os.environ.get("IDP_OIDC_PRIVATE_KEY","")
+assert IDP_OIDC_PRIVATE_KEY, "Please provide a private key. You can generate a key with: openssl genpkey -algorithm RSA -out private_key.pem -pkeyopt rsa_keygen_bits:2048"
+IDP_OIDC_ACCESS_TOKEN_FORMAT = "jwt"
+# 315360000 = 10 years
+IDP_OIDC_ACCESS_TOKEN_EXPIRES_IN = 315360000
 
 # Internationalization
 # https://docs.djangoproject.com/en/6.0/topics/i18n/
@@ -116,14 +148,90 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
-STATIC_URL = "static/"
+APP_ROOT = os.getenv('APP_ROOT', '')
 
-print("base", BASE_DIR)
-STATIC_ROOT = [
-    BASE_DIR / "static"
-]
+STATIC_URL = "/" + APP_ROOT + "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
-LLM_HOST = os.getenv("LLM_HOST", "mockserver")
+MEDIA_URL = "/" + APP_ROOT + "media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
+KB_PDF_MAX_SIZE_MB = int(os.getenv("KB_PDF_MAX_SIZE_MB", 20))
+
+LLM_HOST = os.getenv("LLM_HOST", "http://mock:3000/")
 LLM_TOKEN = os.getenv("LLM_TOKEN", "")
 LLM_MODEL = os.getenv("LLM_MODEL", "")
 LLM_QUERY_ENDPOINT = os.getenv("LLM_QUERY_ENDPOINT", "v1/chat/completions")
+# Timeout in seconds for LLM API requests.
+LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", 120))
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "4096"))
+
+# MCP Knowledge Base Configuration
+KB_MCP_HOST = os.getenv("KB_MCP_HOST", "http://localhost:8002")
+KB_MCP_JWT_TOKEN = os.getenv("KB_MCP_JWT_TOKEN", "")
+KB_MCP_TIMEOUT = int(os.getenv("KB_MCP_TIMEOUT", 30))
+KB_MCP_PDF_TIMEOUT = int(os.getenv("KB_MCP_PDF_TIMEOUT", 300)) # Timeout is in seconds 300 seconds (5 minutes)
+# Number of retries for the PDF upload, used in add_pdf_to_kb function in kb_connector.py
+KB_MCP_PDF_RETRIES = int(os.getenv("KB_MCP_PDF_RETRIES", 2))
+
+# Header names the PDF zip upload view expects in the metadata CSV inside the zip file
+# Comma separated, ORDER MATTERS: 
+# first = column holding the PDF filename in the zip file,
+# second = column holding the PDFResource title
+#
+# Default ("filename,title") means the CSV file must look like:
+#     filename,title
+#     example.pdf, Example Document
+#     test.pdf,Test Document
+#
+# Set PDF_ZIP_CSV_COLUMNS=archive,number and the same view now expects:
+#     archive,number
+#     example.pdf, Example Document
+#     test.pdf,Test Document
+#
+# Setting PDF_ZIP_CSV_COLUMNS= (empty) or tto a single column is NOT suppored:
+# the upload view requires both a filename column and a title column, so
+# PDFResourceAdmin will raise ImproperlyConfigured at request time.
+#
+# Only the filename and title columns are configurable here. The importer also
+# reads optional, fixed-name metadata columns when present: date_published,
+# document_type, document_author_institution, institution_type. Any other
+# columns are ignored.
+
+PDF_ZIP_CSV_COLUMNS = tuple(
+    column.strip() for column in os.getenv("PDF_ZIP_CSV_COLUMNS", "filename,title").split(",") if column.strip()
+)
+
+# Number of resources to fetch per page
+KB_RESOURCES_PAGE_SIZE = int(os.getenv("KB_RESOURCES_PAGE_SIZE", 20))
+
+# Sidebar conversations limit
+SIDEBAR_CONVERSATIONS_LIMIT = int(os.getenv("SIDEBAR_CONVERSATIONS_LIMIT", 10))
+
+# Django-Allauth Configuration
+LOGIN_REDIRECT_URL = "/" + APP_ROOT + "ask/"
+LOGOUT_REDIRECT_URL = "/" + APP_ROOT + ""
+LOGIN_URL = "/" + APP_ROOT
+
+ACCOUNT_LOGIN_METHODS = {"email", "username"}
+ACCOUNT_SIGNUP_FIELDS = ["email*", "username*", "password1*", "password2*"]
+ACCOUNT_EMAIL_VERIFICATION = "optional"
+ACCOUNT_LOGOUT_ON_GET = False
+ACCOUNT_SESSION_REMEMBER = True
+
+
+# Terms of Use
+TERMS_VERSION = "0.1"
+
+# For production, uncomment the following setting and comment out the console backend
+# EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+
+EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+
+# Production SMTP settings
+EMAIL_HOST = os.getenv("EMAIL_HOST", "")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", 587))
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "noreply@example.com")

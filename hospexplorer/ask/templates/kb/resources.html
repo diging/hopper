@@ -1,0 +1,846 @@
+{% extends "_base.html" %}
+{% load static %}
+
+{% block content %}
+<link rel="stylesheet" href="{% static 'css/ask.css' %}">
+
+<div class="kb-page" x-data="kbCompare()">
+    <div class="kb-header">
+        <div>
+            <a href="{% url 'ask:index' %}" class="kb-back-link">
+                &larr; Back to Chat
+            </a>
+            <h3 class="mb-0 mt-2">Knowledge Base Resources</h3>
+        </div>
+        <button @click="compare()" :disabled="comparing" class="btn btn-primary-maroon">
+            <span x-show="!comparing">Compare with Knowledge Base</span>
+            <span x-show="comparing">
+                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                Syncing...
+            </span>
+        </button>
+    </div>
+
+    <!-- Toast notifications -->
+    <div class="kb-toast-container">
+        <template x-for="toast in toasts" :key="toast.id">
+            <div class="kb-toast" :class="'kb-toast-' + toast.type"
+                 x-show="toast.visible"
+                 x-transition:enter="kb-toast-enter"
+                 x-transition:enter-start="kb-toast-enter-start"
+                 x-transition:enter-end="kb-toast-enter-end"
+                 x-transition:leave="kb-toast-leave"
+                 x-transition:leave-start="kb-toast-leave-start"
+                 x-transition:leave-end="kb-toast-leave-end">
+                <span x-text="toast.message"></span>
+                <button type="button" class="kb-toast-close" @click="dismissToast(toast.id)">&times;</button>
+            </div>
+        </template>
+    </div>
+
+    <!-- Compare error -->
+    <div x-show="compareError" x-cloak class="alert alert-danger alert-dismissible fade show mt-3">
+        <span x-text="compareError"></span>
+        <button type="button" class="btn-close" @click="compareError = null"></button>
+    </div>
+
+    <!-- Compare summary -->
+    <div x-show="compareResult" x-cloak class="alert alert-dismissible fade show mt-3 kb-alert-maroon">
+        <strong>Comparison Results:</strong>
+        <span x-text="compareSummary"></span>
+        <button type="button" class="btn-close" @click="compareResult = null"></button>
+    </div>
+
+    <!-- Tabs -->
+    <ul class="nav nav-tabs mt-3" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="websites-tab" data-bs-toggle="tab" data-bs-target="#websites-pane" type="button" role="tab">
+                Websites
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="pdfs-tab" data-bs-toggle="tab" data-bs-target="#pdfs-pane" type="button" role="tab">
+                PDFs
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content">
+        <!-- ========== WEBSITES TAB ========== -->
+        <div class="tab-pane fade show active" id="websites-pane" role="tabpanel">
+            <div class="card border-0 shadow-sm mt-3">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0 kb-table">
+                        <thead>
+                            <tr>
+                                <th>Title</th>
+                                <th>URL</th>
+                                <th>Last Included</th>
+                                <th>KB Status</th>
+                                {% if can_change %}<th>Actions</th>{% endif %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for resource in web_page_obj %}
+                            <tr :class="getRowClass({{ resource.id }})">
+                                <td>{{ resource.title }}</td>
+                                <td>
+                                    <a href="{{ resource.url }}" target="_blank" rel="noopener" class="kb-link text-truncate d-inline-block" style="max-width: 300px;">
+                                        {{ resource.url|truncatechars:60 }}
+                                    </a>
+                                </td>
+                                <td class="text-muted">{{ resource.modified_at|date:"N j, Y, P" }}</td>
+                                <td>
+                                    <span x-text="getStatus({{ resource.id }})">--</span>
+                                </td>
+                                {% if can_change %}
+                                <td class="align-middle">
+                                    <button
+                                        x-show="statusMap[{{ resource.id }}] === 'missing_from_kb'"
+                                        x-cloak
+                                        @click="addToKb({{ resource.id }})"
+                                        :disabled="loadingKey === 'add-{{ resource.id }}'"
+                                        class="btn btn-sm btn-primary-maroon kb-action-btn">
+                                        <span x-show="loadingKey !== 'add-{{ resource.id }}'">Add to KB</span>
+                                        <span x-show="loadingKey === 'add-{{ resource.id }}'">
+                                            <span class="spinner-border spinner-border-sm me-1"></span> Adding...
+                                        </span>
+                                    </button>
+                                </td>
+                                {% endif %}
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="{% if can_change %}5{% else %}4{% endif %}" class="text-muted text-center py-4">No website resources found.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Untracked KB documents (websites) -->
+            <div x-show="untracked.length > 0" x-cloak class="mt-4">
+                <h5 class="kb-section-heading">Documents in KB but not tracked internally</h5>
+                <div class="card border-0 shadow-sm">
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0 kb-table">
+                            <thead>
+                                <tr>
+                                    <th>Title</th>
+                                    <th>URL</th>
+                                    {% if can_add or can_delete %}<th>Actions</th>{% endif %}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="doc in untracked" :key="doc.url">
+                                    <tr class="kb-row-untracked">
+                                        <td x-text="doc.title"></td>
+                                        <td>
+                                            <a :href="doc.url" target="_blank" rel="noopener" x-text="doc.url" class="kb-link text-truncate d-inline-block" style="max-width: 400px;"></a>
+                                        </td>
+                                        {% if can_add or can_delete %}
+                                        <td class="text-nowrap align-middle">
+                                            {% if can_add %}
+                                            <button
+                                                @click="trackInHopper(doc)"
+                                                :disabled="loadingKey === 'track-' + doc.doc_id"
+                                                class="btn btn-sm btn-primary-maroon kb-action-btn me-1">
+                                                <span x-show="loadingKey !== 'track-' + doc.doc_id">Track in Hopper</span>
+                                                <span x-show="loadingKey === 'track-' + doc.doc_id">
+                                                    <span class="spinner-border spinner-border-sm me-1"></span> Tracking...
+                                                </span>
+                                            </button>
+                                            {% endif %}
+                                            {% if can_delete %}
+                                            <button
+                                                @click="removeFromKb(doc)"
+                                                :disabled="loadingKey === 'remove-' + doc.doc_id"
+                                                class="btn btn-sm btn-outline-maroon kb-action-btn">
+                                                <span x-show="loadingKey !== 'remove-' + doc.doc_id">Remove from KB</span>
+                                                <span x-show="loadingKey === 'remove-' + doc.doc_id">
+                                                    <span class="spinner-border spinner-border-sm me-1"></span> Removing...
+                                                </span>
+                                            </button>
+                                            {% endif %}
+                                        </td>
+                                        {% endif %}
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Website pagination -->
+            {% if web_page_obj.has_other_pages %}
+            <nav class="mt-3">
+                <ul class="pagination justify-content-center">
+                    {% if web_page_obj.has_previous %}
+                    <li class="page-item">
+                        <a class="page-link" href="?web_page={{ web_page_obj.previous_page_number }}">Previous</a>
+                    </li>
+                    {% else %}
+                    <li class="page-item disabled"><span class="page-link">Previous</span></li>
+                    {% endif %}
+
+                    {% for num in web_page_obj.paginator.page_range %}
+                    <li class="page-item {% if web_page_obj.number == num %}active{% endif %}">
+                        <a class="page-link" href="?web_page={{ num }}">{{ num }}</a>
+                    </li>
+                    {% endfor %}
+
+                    {% if web_page_obj.has_next %}
+                    <li class="page-item">
+                        <a class="page-link" href="?web_page={{ web_page_obj.next_page_number }}">Next</a>
+                    </li>
+                    {% else %}
+                    <li class="page-item disabled"><span class="page-link">Next</span></li>
+                    {% endif %}
+                </ul>
+            </nav>
+            {% endif %}
+        </div>
+
+        <!-- ========== PDFs TAB ========== -->
+        <div class="tab-pane fade" id="pdfs-pane" role="tabpanel">
+
+            <!-- PDF resources table -->
+            <div class="card border-0 shadow-sm mt-3">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0 kb-table">
+                        <thead>
+                            <tr>
+                                <th>Title</th>
+                                <th>Filename</th>
+                                <th>Last Modified</th>
+                                <th>KB Status</th>
+                                {% if can_change_pdf %}<th>Actions</th>{% endif %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for resource in pdf_page_obj %}
+                            <tr :class="getPdfRowClass({{ resource.id }})">
+                                <td>{{ resource.title }}</td>
+                                <td class="text-muted">{{ resource.file.name|truncatechars:40 }}</td>
+                                <td class="text-muted">{{ resource.modified_at|date:"N j, Y, P" }}</td>
+                                <td>
+                                    <span x-text="getPdfStatus({{ resource.id }})">--</span>
+                                </td>
+                                {% if can_change_pdf %}
+                                <td class="align-middle">
+                                    <button
+                                        x-show="pdfStatusMap[{{ resource.id }}] === 'missing_from_kb'"
+                                        x-cloak
+                                        @click="addPdfToKb({{ resource.id }})"
+                                        :disabled="loadingKey === 'add-pdf-{{ resource.id }}'"
+                                        class="btn btn-sm btn-primary-maroon kb-action-btn">
+                                        <span x-show="loadingKey !== 'add-pdf-{{ resource.id }}'">Add to KB</span>
+                                        <span x-show="loadingKey === 'add-pdf-{{ resource.id }}'">
+                                            <span class="spinner-border spinner-border-sm me-1"></span> Adding...
+                                        </span>
+                                    </button>
+                                </td>
+                                {% endif %}
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="{% if can_change_pdf %}5{% else %}4{% endif %}" class="text-muted text-center py-4">No PDF resources found.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Untracked KB PDFs -->
+            <div x-show="untrackedPdfs.length > 0" x-cloak class="mt-4">
+                <h5 class="kb-section-heading">PDFs in KB but not tracked internally</h5>
+                <div class="card border-0 shadow-sm">
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0 kb-table">
+                            <thead>
+                                <tr>
+                                    <th>Title</th>
+                                    {% if can_add_pdf or can_delete_pdf %}<th>Actions</th>{% endif %}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="doc in untrackedPdfs" :key="doc.doc_id">
+                                    <tr class="kb-row-untracked">
+                                        <td x-text="doc.title"></td>
+                                        {% if can_add_pdf or can_delete_pdf %}
+                                        <td class="text-nowrap align-middle">
+                                            {% if can_add_pdf %}
+                                            <button
+                                                @click="trackPdfInHopper(doc)"
+                                                :disabled="loadingKey === 'track-pdf-' + doc.doc_id"
+                                                class="btn btn-sm btn-primary-maroon kb-action-btn me-1">
+                                                <span x-show="loadingKey !== 'track-pdf-' + doc.doc_id">Track in Hopper</span>
+                                                <span x-show="loadingKey === 'track-pdf-' + doc.doc_id">
+                                                    <span class="spinner-border spinner-border-sm me-1"></span> Tracking...
+                                                </span>
+                                            </button>
+                                            {% endif %}
+                                            {% if can_delete_pdf %}
+                                            <button
+                                                @click="removeFromKb(doc)"
+                                                :disabled="loadingKey === 'remove-' + doc.doc_id"
+                                                class="btn btn-sm btn-outline-maroon kb-action-btn">
+                                                <span x-show="loadingKey !== 'remove-' + doc.doc_id">Remove from KB</span>
+                                                <span x-show="loadingKey === 'remove-' + doc.doc_id">
+                                                    <span class="spinner-border spinner-border-sm me-1"></span> Removing...
+                                                </span>
+                                            </button>
+                                            {% endif %}
+                                        </td>
+                                        {% endif %}
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PDF pagination -->
+            {% if pdf_page_obj.has_other_pages %}
+            <nav class="mt-3">
+                <ul class="pagination justify-content-center">
+                    {% if pdf_page_obj.has_previous %}
+                    <li class="page-item">
+                        <a class="page-link" href="?pdf_page={{ pdf_page_obj.previous_page_number }}">Previous</a>
+                    </li>
+                    {% else %}
+                    <li class="page-item disabled"><span class="page-link">Previous</span></li>
+                    {% endif %}
+
+                    {% for num in pdf_page_obj.paginator.page_range %}
+                    <li class="page-item {% if pdf_page_obj.number == num %}active{% endif %}">
+                        <a class="page-link" href="?pdf_page={{ num }}">{{ num }}</a>
+                    </li>
+                    {% endfor %}
+
+                    {% if pdf_page_obj.has_next %}
+                    <li class="page-item">
+                        <a class="page-link" href="?pdf_page={{ pdf_page_obj.next_page_number }}">Next</a>
+                    </li>
+                    {% else %}
+                    <li class="page-item disabled"><span class="page-link">Next</span></li>
+                    {% endif %}
+                </ul>
+            </nav>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<script>
+function kbCompare() {
+    return {
+        comparing: false,
+        compareResult: null,
+        compareError: null,
+        statusMap: {},
+        pdfStatusMap: {},
+        untracked: [],
+        untrackedPdfs: [],
+        compareSummary: '',
+        loadingKey: null,
+        toasts: [],
+        _toastId: 0,
+
+        showToast(message, type = 'success') {
+            const id = ++this._toastId;
+            this.toasts.push({ id, message, type, visible: true });
+            setTimeout(() => this.dismissToast(id), 5000);
+        },
+
+        dismissToast(id) {
+            const toast = this.toasts.find(t => t.id === id);
+            if (toast) toast.visible = false;
+            setTimeout(() => {
+                this.toasts = this.toasts.filter(t => t.id !== id);
+            }, 300);
+        },
+
+        async compare() {
+            this.comparing = true;
+            this.compareError = null;
+            this.compareResult = null;
+            this.untracked = [];
+            this.untrackedPdfs = [];
+            try {
+                const response = await fetch('{% url "ask:kb-compare" %}', {
+                    method: 'POST',
+                    headers: { 'X-CSRFToken': '{{ csrf_token }}' },
+                });
+                const data = await response.json();
+                if (data.success) {
+                    this.compareResult = data;
+
+                    // Website statuses
+                    this.statusMap = {};
+                    for (const r of data.resources) {
+                        this.statusMap[r.id] = r.status;
+                    }
+                    this.untracked = data.untracked || [];
+
+                    // PDF statuses
+                    this.pdfStatusMap = {};
+                    for (const r of (data.pdf_results || [])) {
+                        this.pdfStatusMap[r.id] = r.status;
+                    }
+                    this.untrackedPdfs = data.untracked_pdfs || [];
+
+                    const webInSync = data.resources.filter(r => r.status === 'in_kb').length;
+                    const webMissing = data.resources.filter(r => r.status === 'missing_from_kb').length;
+                    const pdfResults = data.pdf_results || [];
+                    const pdfInSync = pdfResults.filter(r => r.status === 'in_kb').length;
+                    const pdfMissing = pdfResults.filter(r => r.status === 'missing_from_kb').length;
+                    this.compareSummary = `Websites: ${webInSync} in sync, ${webMissing} missing. PDFs: ${pdfInSync} in sync, ${pdfMissing} missing. ${this.untracked.length + this.untrackedPdfs.length} untracked. (${data.kb_total} KB docs total)`;
+                } else {
+                    this.compareError = data.error || 'Comparison failed.';
+                }
+            } catch (e) {
+                this.compareError = 'Failed to connect. Please try again.';
+            }
+            this.comparing = false;
+        },
+
+        getStatus(id) {
+            if (!this.compareResult) return '--';
+            const s = this.statusMap[id];
+            if (s === 'in_kb') return 'In Sync';
+            if (s === 'missing_from_kb') return 'Missing from KB';
+            return '--';
+        },
+
+        getRowClass(id) {
+            if (!this.compareResult) return '';
+            const s = this.statusMap[id];
+            if (s === 'in_kb') return 'kb-row-maroon';
+            if (s === 'missing_from_kb') return 'table-warning';
+            return '';
+        },
+
+        getPdfStatus(id) {
+            if (!this.compareResult) return '--';
+            const s = this.pdfStatusMap[id];
+            if (s === 'in_kb') return 'In Sync';
+            if (s === 'missing_from_kb') return 'Missing from KB';
+            return '--';
+        },
+
+        getPdfRowClass(id) {
+            if (!this.compareResult) return '';
+            const s = this.pdfStatusMap[id];
+            if (s === 'in_kb') return 'kb-row-maroon';
+            if (s === 'missing_from_kb') return 'table-warning';
+            return '';
+        },
+
+        async addToKb(resourceId) {
+            this.loadingKey = `add-${resourceId}`;
+            try {
+                const response = await fetch('{% url "ask:kb-add-to-kb" %}', {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': '{{ csrf_token }}',
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ id: resourceId }),
+                });
+                const data = await response.json();
+                if (data.success) {
+                    this.statusMap[resourceId] = 'in_kb';
+                    this.showToast('Added to Knowledge Base successfully.');
+                } else {
+                    this.showToast(data.error || 'Failed to add to KB.', 'error');
+                }
+            } catch (e) {
+                this.showToast('Failed to connect to server.', 'error');
+            }
+            this.loadingKey = null;
+        },
+
+        async addPdfToKb(resourceId) {
+            this.loadingKey = `add-pdf-${resourceId}`;
+            try {
+                const response = await fetch('{% url "ask:kb-add-pdf-to-kb" %}', {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': '{{ csrf_token }}',
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ id: resourceId }),
+                });
+                const data = await response.json();
+                if (data.success) {
+                    this.pdfStatusMap[resourceId] = 'in_kb';
+                    this.showToast('PDF added to Knowledge Base successfully.');
+                } else {
+                    this.showToast(data.error || 'Failed to add PDF to KB.', 'error');
+                }
+            } catch (e) {
+                this.showToast('Failed to connect to server.', 'error');
+            }
+            this.loadingKey = null;
+        },
+
+        async uploadPdf() {
+            this.loadingKey = 'upload-pdf';
+            const form = document.getElementById('pdf-upload-form');
+            const formData = new FormData(form);
+
+            try {
+                const response = await fetch('{% url "ask:kb-upload-pdf" %}', {
+                    method: 'POST',
+                    headers: { 'X-CSRFToken': '{{ csrf_token }}' },
+                    body: formData,
+                });
+                const data = await response.json();
+                if (data.success) {
+                    this.showToast(data.warning || 'PDF uploaded successfully.');
+                    window.location.reload();
+                } else {
+                    this.showToast(data.error || 'Upload failed.', 'error');
+                }
+            } catch (e) {
+                this.showToast('Failed to connect to server.', 'error');
+            }
+            this.loadingKey = null;
+        },
+
+        async trackInHopper(doc) {
+            this.loadingKey = `track-${doc.doc_id}`;
+            try {
+                const response = await fetch('{% url "ask:kb-add-resource" %}', {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': '{{ csrf_token }}',
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ url: doc.url, title: doc.title, doc_id: doc.doc_id }),
+                });
+                const data = await response.json();
+                if (data.success) {
+                    this.untracked = this.untracked.filter(d => d.doc_id !== doc.doc_id);
+
+                    if (data.merged) {
+                        // Linked an existing Hopper row — that row is already shown in
+                        // the table, so refresh its status instead of adding a duplicate.
+                        this.statusMap[data.id] = 'in_kb';
+                        this.showToast(`Linked "${doc.title}" to the existing Hopper resource.`);
+                    } else {
+                        const tbody = document.querySelector('#websites-pane .kb-table tbody');
+                        if (tbody) {
+                            const tr = document.createElement('tr');
+                            tr.className = 'kb-row-maroon';
+                            const truncUrl = doc.url.length > 60 ? doc.url.slice(0, 57) + '...' : doc.url;
+                            const now = new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+                            tr.innerHTML = `
+                                <td>${doc.title}</td>
+                                <td><a href="${doc.url}" target="_blank" rel="noopener" class="kb-link text-truncate d-inline-block" style="max-width: 300px;">${truncUrl}</a></td>
+                                <td class="text-muted">${now}</td>
+                                <td>In Sync</td>
+                                {% if can_change %}<td></td>{% endif %}
+                            `;
+                            tbody.prepend(tr);
+                        }
+                        this.showToast(`Now tracking "${doc.title}" in Hopper.`);
+                    }
+                } else {
+                    this.showToast(data.error || 'Failed to track resource.', 'error');
+                }
+            } catch (e) {
+                this.showToast('Failed to connect to server.', 'error');
+            }
+            this.loadingKey = null;
+        },
+
+        async trackPdfInHopper(doc) {
+            this.loadingKey = `track-pdf-${doc.doc_id}`;
+            try {
+                const response = await fetch('{% url "ask:kb-add-pdf-resource" %}', {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': '{{ csrf_token }}',
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ doc_id: doc.doc_id, title: doc.title }),
+                });
+                const data = await response.json();
+                if (data.success) {
+                    this.untrackedPdfs = this.untrackedPdfs.filter(d => d.doc_id !== doc.doc_id);
+                    this.pdfStatusMap[data.id] = 'in_kb';
+
+                    if (data.merged) {
+                        // Linked an existing Hopper row — its row is already shown and its
+                        // status was just set above, so don't add a duplicate row.
+                        this.showToast(`Linked "${doc.title}" to the existing Hopper resource.`);
+                    } else {
+                        const tbody = document.querySelector('#pdfs-pane .kb-table tbody');
+                        if (tbody) {
+                            const tr = document.createElement('tr');
+                            tr.className = 'kb-row-maroon';
+                            const filename = data.filename || '';
+                            const truncFilename = filename.length > 40 ? filename.slice(0, 37) + '...' : filename;
+                            const now = new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+                            tr.innerHTML = `
+                                <td>${data.title}</td>
+                                <td class="text-muted">${truncFilename}</td>
+                                <td class="text-muted">${now}</td>
+                                <td>In Sync</td>
+                                {% if can_change_pdf %}<td></td>{% endif %}
+                            `;
+                            tbody.prepend(tr);
+                        }
+                        this.showToast(`Now tracking "${doc.title}" in Hopper.`);
+                    }
+                } else {
+                    this.showToast(data.error || 'Failed to track PDF.', 'error');
+                }
+            } catch (e) {
+                this.showToast('Failed to connect to server.', 'error');
+            }
+            this.loadingKey = null;
+        },
+
+        async removeFromKb(doc) {
+            this.loadingKey = `remove-${doc.doc_id}`;
+            try {
+                const response = await fetch('{% url "ask:kb-remove-from-kb" %}', {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': '{{ csrf_token }}',
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ doc_id: doc.doc_id }),
+                });
+                const data = await response.json();
+                if (data.success) {
+                    this.untracked = this.untracked.filter(d => d.doc_id !== doc.doc_id);
+                    this.untrackedPdfs = this.untrackedPdfs.filter(d => d.doc_id !== doc.doc_id);
+                    this.showToast(`Removed "${doc.title}" from Knowledge Base.`);
+                } else {
+                    this.showToast(data.error || 'Failed to remove from KB.', 'error');
+                }
+            } catch (e) {
+                this.showToast('Failed to connect to server.', 'error');
+            }
+            this.loadingKey = null;
+        }
+    };
+}
+</script>
+
+<style>
+[x-cloak] { display: none !important; }
+
+/* Toast notifications */
+.kb-toast-container {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    z-index: 1080;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-width: 400px;
+}
+
+.kb-toast {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    border-radius: 0.5rem;
+    font-size: 0.9rem;
+    font-weight: 500;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    color: #fff;
+}
+
+.kb-toast-success {
+    background-color: #2e7d32;
+}
+
+.kb-toast-error {
+    background-color: #c62828;
+}
+
+.kb-toast-close {
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 1.2rem;
+    padding: 0 0 0 0.75rem;
+    cursor: pointer;
+    opacity: 0.8;
+    line-height: 1;
+}
+
+.kb-toast-close:hover {
+    opacity: 1;
+}
+
+.kb-toast-enter { transition: all 0.3s ease-out; }
+.kb-toast-enter-start { opacity: 0; transform: translateX(1rem); }
+.kb-toast-enter-end { opacity: 1; transform: translateX(0); }
+.kb-toast-leave { transition: all 0.2s ease-in; }
+.kb-toast-leave-start { opacity: 1; }
+.kb-toast-leave-end { opacity: 0; transform: translateX(1rem); }
+
+/* Alerts */
+.kb-alert-maroon {
+    background-color: #f2d4dd;
+    border-color: #e6b3c1;
+    color: #6b1530;
+}
+
+/* Row colors */
+.kb-row-maroon {
+    background-color: #f2d4dd !important;
+}
+
+.kb-row-untracked {
+    background-color: #fce4ec !important;
+}
+
+/* Layout */
+.kb-page {
+    padding: 1.5rem;
+    background: #f8f9fa;
+    min-height: calc(100vh - 1px);
+}
+
+.kb-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.kb-header h3 {
+    font-weight: 700;
+    color: #212529;
+}
+
+.kb-back-link {
+    text-decoration: none;
+    color: #8C1D40;
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.kb-back-link:hover {
+    color: #6b1530;
+}
+
+/* Tabs */
+.nav-tabs .nav-link {
+    color: #8C1D40;
+    font-weight: 500;
+}
+
+.nav-tabs .nav-link.active {
+    color: #6b1530;
+    font-weight: 600;
+    border-bottom-color: #8C1D40;
+}
+
+.nav-tabs .nav-link:hover {
+    color: #6b1530;
+}
+
+/* Buttons */
+.btn-primary-maroon {
+    background-color: #8C1D40;
+    border-color: #8C1D40;
+    color: #fff;
+    font-weight: 500;
+}
+
+.btn-primary-maroon:hover {
+    background-color: #6b1530;
+    border-color: #6b1530;
+    color: #fff;
+}
+
+.btn-primary-maroon:disabled {
+    background-color: #8C1D40;
+    border-color: #8C1D40;
+    opacity: 0.65;
+    color: #fff;
+}
+
+.btn-outline-maroon {
+    background-color: transparent;
+    border: 1px solid #8C1D40;
+    color: #8C1D40;
+    font-weight: 500;
+}
+
+.btn-outline-maroon:hover {
+    background-color: #8C1D40;
+    color: #fff;
+}
+
+.btn-outline-maroon:disabled {
+    opacity: 0.65;
+    color: #8C1D40;
+    background-color: transparent;
+}
+
+.kb-action-btn {
+    min-width: 120px;
+    white-space: nowrap;
+}
+
+/* Table */
+.kb-table {
+    font-size: 0.9rem;
+}
+
+.kb-table thead th {
+    background: #f8f9fa;
+    border-bottom: 2px solid #dee2e6;
+    color: #495057;
+    font-weight: 600;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.kb-link {
+    color: #8C1D40;
+}
+
+.kb-link:hover {
+    color: #6b1530;
+}
+
+.kb-section-heading {
+    font-weight: 600;
+    color: #212529;
+    font-size: 1rem;
+}
+
+/* Pagination */
+.page-item.active .page-link {
+    background-color: #8C1D40;
+    border-color: #8C1D40;
+}
+
+.page-link {
+    color: #8C1D40;
+}
+
+.page-link:hover {
+    color: #6b1530;
+}
+</style>
+{% endblock %}

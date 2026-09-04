@@ -7,4 +7,4 @@ ENV PATH="~/.local/bin/:${PATH}"
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-ENTRYPOINT ["./startup.sh"]
+ENTRYPOINT ["./docker/startup.sh"]

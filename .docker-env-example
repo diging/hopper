@@ -1,0 +1,16 @@
+DB_PORT=5432
+WEB_PORT=8000
+
+# PostgreSQL settings
+POSTGRES_DB=hopper
+POSTGRES_USER=hopper
+POSTGRES_PASSWORD=password
+
+# Django settings
+DJANGO_SECRET_KEY=secret-key
+DJANGO_DEBUG=False
+DJANGO_ALLOWED_HOSTS=localhost
+CSRF_TRUSTED_ORIGINS=http://localhost/,http://127.0.0.1/
+
+# URL prefix
+APP_ROOT="" # needs to end in / if specified

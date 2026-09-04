@@ -1,0 +1,33 @@
+{% extends "account/_base_auth.html" %}
+{% load static %}
+
+{% block content %}
+<div class="col-11 col-md-8 col-lg-6">
+    <div class="card" style="border-color: #8C1D40; border-width: 2px;">
+        <div class="card-body p-4">
+            <div class="text-center mb-4">
+                <img width="60" src="{% static 'assets/asu.png' %}" alt="Hopper Logo" class="mb-3">
+                <h3 class="card-title">Terms of Use</h3>
+                <p class="text-muted">Please review and accept the Terms of Use to continue.</p>
+            </div>
+
+            <div class="border rounded p-3 mb-4" style="max-height: 400px; overflow-y: auto;">
+                {% include "terms/terms_of_use_content.html" %}
+            </div>
+
+            <form method="post" action="{% url 'ask:terms-accept' %}">
+                {% csrf_token %}
+                <div class="d-grid gap-2">
+                    <button type="submit" class="btn btn-lg"
+                            style="background-color: #8C1D40; border-color: #8C1D40; color: white;">
+                        I Agree to the Terms of Use
+                    </button>
+                </div>
+            </form>
+            <div class="text-center mt-3">
+                <a href="{% url 'account_logout' %}" class="btn btn-outline-secondary small">Sign Out</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

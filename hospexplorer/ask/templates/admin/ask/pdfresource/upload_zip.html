@@ -1,0 +1,38 @@
+{% extends "admin/base_site.html" %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Home</a>
+    &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+    &rsaquo; <a href="{{ changelist_url }}">{{ opts.verbose_name_plural|capfirst }}</a>
+    &rsaquo; {{ title }}
+</div>
+{% endblock %}
+
+{% block content %}
+<p>
+    Upload a <code>.zip</code> containing PDF files and a single CSV metadata file.
+    Each row creates a PDF Resource and pushes the file to the Knowledge Base.
+</p>
+<p>
+    Required CSV columns: <code>{{ required_columns_label }}</code>.
+</p>
+<p>
+    Optional metadata columns (per row, leave blank if unknown):
+    <code>date_published</code> &mdash; a year, <code>YYYY-MM</code>, or
+    <code>YYYY-MM-DD</code>; <code>document_type</code>,
+    <code>document_author_institution</code>, <code>institution_type</code>
+    &mdash; controlled-list values, created automatically as rows are imported.
+</p>
+<form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    <p>
+        <label for="zip_file">Zip file:</label>
+        <input type="file" name="zip_file" id="zip_file" accept=".zip" required>
+    </p>
+    <div class="submit-row">
+        <input type="submit" value="Upload" class="default">
+        <a href="{{ changelist_url }}" class="closelink">Cancel</a>
+    </div>
+</form>
+{% endblock %}
