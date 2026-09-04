@@ -309,6 +309,58 @@ class KBAddPdfResourceViewTests(TestCase):
         self.assertIn("id", body)
 
 
+class KBAddPdfToMcpViewTests(TestCase):
+    """The re-ingest endpoint that pushes a stored PDF back into the KB.
+
+    A PDFResource can legitimately exist with no local file (tracking-only
+    rows created when the KB doc's bytes were never downloaded). Re-ingesting
+    such a row has no bytes to send, so it must fail cleanly instead of
+    raising ValueError from the empty FileField.
+    """
+
+    URL = "/hopper/ask/kb/add-pdf-to-kb/"
+
+    def setUp(self):
+        media_root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, media_root, ignore_errors=True)
+        override = override_settings(MEDIA_ROOT=media_root)
+        override.enable()
+        self.addCleanup(override.disable)
+
+        self.user = User.objects.create_user("curator", password="pw")
+        self.user.user_permissions.add(
+            Permission.objects.get(codename="change_pdfresource")
+        )
+        TermsAcceptance.objects.create(
+            user=self.user, terms_version=settings.TERMS_VERSION
+        )
+        self.client.force_login(self.user)
+
+    def _post(self, body):
+        return self.client.post(
+            self.URL, data=json.dumps(body), content_type="application/json"
+        )
+
+    @patch("ask.views.add_pdf_to_kb")
+    def test_resource_without_file_fails_cleanly(self, mock_add):
+        pdf = PDFResource.objects.create(title="Tracking only", creator=self.user)
+        resp = self._post({"id": pdf.id})
+        self.assertEqual(resp.status_code, 400)
+        self.assertFalse(resp.json()["success"])
+        mock_add.assert_not_called()
+
+    @patch("ask.views.add_pdf_to_kb")
+    def test_resource_with_file_is_reingested(self, mock_add):
+        mock_add.return_value = {"doc_id": 321}
+        pdf = PDFResource(title="Real report", creator=self.user)
+        pdf.file.save("report.pdf", ContentFile(b"%PDF-1.4 real"), save=True)
+        resp = self._post({"id": pdf.id})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["success"])
+        pdf.refresh_from_db()
+        self.assertEqual(pdf.mcp_kb_document_id, 321)
+
+
 class DownloadKBPdfHelperTests(TestCase):
     """Unit tests for the new kb_connector.download_kb_pdf helper."""
 
