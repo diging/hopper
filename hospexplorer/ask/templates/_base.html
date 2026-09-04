@@ -22,15 +22,10 @@
                  x-data="sidebarConversations()"
                  @conversation-updated.window="upsertConversation($event.detail)">
                 <div class="sidebar-heading border-bottom bg-white">
-<<<<<<< HEAD
                     <a href="{% url 'ask:index' %}" class="text-decoration-none text-dark d-flex align-items-center">
                         <img width="50" src="{% static 'assets/asu.png' %}" alt="Hopper Logo">
                         <span class="ms-1">Hopper</span>
                     </a>
-=======
-                    <img width="50" src="{% static 'assets/asu.png' %}">
-                    Hopper
->>>>>>> main
                 </div>
                 <div class="list-group list-group-flush flex-grow-1">
                     {% if user.is_authenticated %}
