@@ -30,6 +30,18 @@
         <label for="zip_file">Zip file:</label>
         <input type="file" name="zip_file" id="zip_file" accept=".zip" required>
     </p>
+    <p>
+        <label>
+            <input type="checkbox" name="update_file" id="update_file">
+            Update file: overwrite existing PDFs (same filename and title) with the newly uploaded files.
+        </label>
+    </p>
+    <p>
+        <label>
+            <input type="checkbox" name="update_metadata" id="update_metadata">
+            Update metadata: refresh metadata on existing PDFs (same filename and title).
+        </label>
+    </p>
     <div class="submit-row">
         <input type="submit" value="Upload" class="default">
         <a href="{{ changelist_url }}" class="closelink">Cancel</a>
