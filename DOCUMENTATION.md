@@ -356,9 +356,7 @@ Settings changed only in code: `TERMS_VERSION` (currently `0.1`), `EMAIL_BACKEND
 
 ---
 
-## Running Hopper
-
-### Development (Docker)
+## Running Hopper Development (Docker)
 
 ```bash
 cp .app_env_example .app_env      # set IDP_OIDC_PRIVATE_KEY, POSTGRES_* (match .docker-env), KB_MCP_*
@@ -384,25 +382,11 @@ docker compose -f docker-compose-prod.yml up -d
 - Uploaded PDFs are stored in `hospexplorer/media/kb_pdfs/`, inside the bind-mounted repo. Back this directory up together with the database.
 - There's no mock service; configure a SIM workflow or `LLM_HOST`.
 
-### Without Docker
-
-Settings hard-code the database host `db`, so you need a Postgres server reachable under that hostname (for example, an `/etc/hosts` entry). Then:
-
-```bash
-source .app_env
-cd hospexplorer
-uv run python manage.py migrate
-uv run python manage.py runserver
-```
-
 ### Tests
 
 ```bash
 docker compose exec web bash -c "source .app_env && cd hospexplorer && uv run python manage.py test ask"
 ```
-
-Tests use Django's test database, which is created on the configured Postgres server, and mock all HopperMCP calls. Make sure `POSTGRES_NAME` and the credentials in `.app_env` point at a database the user can access.
-
 ---
 
 ## First-time setup
