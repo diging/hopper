@@ -142,6 +142,11 @@ class KBAddResourceViewTests(TestCase):
         self.assertEqual(self._post({"url": "https://example.com"}).status_code, 403)
         self.assertFalse(WebsiteResource.objects.exists())
 
+    def test_non_integer_doc_id_is_ignored(self):
+        resp = self._post({"url": "https://example.com", "doc_id": "abc"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsNone(WebsiteResource.objects.get(pk=resp.json()["id"]).mcp_kb_document_id)
+
 
 class KBRemoveFromKBViewTests(TestCase):
     def setUp(self):
@@ -175,6 +180,16 @@ class KBRemoveFromKBViewTests(TestCase):
         self.user.user_permissions.clear()
         self.assertEqual(self._post({"doc_id": 12}).status_code, 403)
         mock_delete.assert_not_called()
+
+    def test_malformed_json_rejected(self):
+        resp = self.client.post(
+            reverse("ask:kb-remove-from-kb"), data="nope", content_type="application/json"
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    @patch("ask.views.delete_kb_document", side_effect=http_status_error(500))
+    def test_kb_http_error_returns_502(self, _):
+        self.assertEqual(self._post({"doc_id": 12}).status_code, 502)
 
 
 class KBAddWebsiteToMcpViewTests(TestCase):
@@ -216,6 +231,16 @@ class KBAddWebsiteToMcpViewTests(TestCase):
     def test_permission_required(self):
         self.user.user_permissions.clear()
         self.assertEqual(self._post({"id": self.resource.id}).status_code, 403)
+
+    def test_malformed_json_rejected(self):
+        resp = self.client.post(
+            reverse("ask:kb-add-to-kb"), data="nope", content_type="application/json"
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    @patch("ask.views.add_website_to_kb", side_effect=httpx.ConnectError("down"))
+    def test_connection_error_returns_503(self, _):
+        self.assertEqual(self._post({"id": self.resource.id}).status_code, 503)
 
 
 class KBUploadPdfViewTests(TestCase):
@@ -406,6 +431,19 @@ class KBAddPdfResourceViewTests(TestCase):
         self.assertTrue(body["filename"])
         self.assertIn("id", body)
 
+    @patch("ask.views.download_kb_pdf", side_effect=httpx.ConnectError("down"))
+    def test_connection_error_returns_503(self, _):
+        resp = self._post({"doc_id": 42, "title": "x"})
+        self.assertEqual(resp.status_code, 503)
+        self.assertFalse(PDFResource.objects.exists())
+
+    @patch("ask.views.download_kb_pdf", side_effect=http_status_error(500))
+    def test_kb_http_error_returns_502(self, _):
+        resp = self._post({"doc_id": 42, "title": "x"})
+        self.assertEqual(resp.status_code, 502)
+        self.assertIn("HTTP 500", resp.json()["error"])
+        self.assertFalse(PDFResource.objects.exists())
+
 
 class KBAddPdfToMcpViewTests(TestCase):
     """The re-ingest endpoint that pushes a stored PDF back into the KB.
@@ -457,3 +495,92 @@ class KBAddPdfToMcpViewTests(TestCase):
         self.assertTrue(resp.json()["success"])
         pdf.refresh_from_db()
         self.assertEqual(pdf.mcp_kb_document_id, 321)
+
+    def _pdf_with_file(self, **fields):
+        pdf = PDFResource(title="Real report", creator=self.user, **fields)
+        pdf.file.save("report.pdf", ContentFile(b"%PDF-1.4 real"), save=True)
+        return pdf
+
+    @patch("ask.views.add_pdf_to_kb")
+    @patch("ask.views.update_pdf_in_kb")
+    def test_linked_resource_updates_existing_kb_document(self, mock_update, mock_add):
+        mock_update.return_value = {"doc_id": 321}
+        pdf = self._pdf_with_file(mcp_kb_document_id=321)
+        resp = self._post({"id": pdf.id})
+        self.assertEqual(resp.json(), {"success": True, "doc_id": 321})
+        mock_update.assert_called_once_with(
+            321, b"%PDF-1.4 real", pdf.file.name.split("/")[-1], "Real report"
+        )
+        mock_add.assert_not_called()
+        pdf.refresh_from_db()
+        self.assertEqual(pdf.modifier, self.user)
+
+    def test_missing_id_rejected(self):
+        self.assertEqual(self._post({}).status_code, 400)
+
+    def test_unknown_resource_returns_404(self):
+        self.assertEqual(self._post({"id": 999999}).status_code, 404)
+
+    def test_malformed_json_rejected(self):
+        resp = self.client.post(self.URL, data="nope", content_type="application/json")
+        self.assertEqual(resp.status_code, 400)
+
+    @patch("ask.views.add_pdf_to_kb")
+    def test_permission_required(self, mock_add):
+        self.user.user_permissions.clear()
+        pdf = self._pdf_with_file()
+        self.assertEqual(self._post({"id": pdf.id}).status_code, 403)
+        mock_add.assert_not_called()
+
+    @patch("ask.views.add_pdf_to_kb", side_effect=httpx.ConnectError("down"))
+    def test_connection_error_returns_503(self, _):
+        pdf = self._pdf_with_file()
+        self.assertEqual(self._post({"id": pdf.id}).status_code, 503)
+        pdf.refresh_from_db()
+        self.assertIsNone(pdf.mcp_kb_document_id)
+
+    @patch("ask.views.add_pdf_to_kb")
+    def test_kb_error_message_is_passed_through(self, mock_add):
+        request = httpx.Request("POST", "http://kb.test/docs/pdf/add")
+        mock_add.side_effect = httpx.HTTPStatusError(
+            "error", request=request,
+            response=httpx.Response(422, json={"error": "PDF has no extractable text."}, request=request),
+        )
+        resp = self._post({"id": self._pdf_with_file().id})
+        self.assertEqual(resp.status_code, 502)
+        self.assertEqual(resp.json()["error"], "PDF has no extractable text.")
+
+    @patch("ask.views.add_pdf_to_kb", side_effect=http_status_error(500))
+    def test_kb_error_without_json_body_gets_generic_message(self, _):
+        resp = self._post({"id": self._pdf_with_file().id})
+        self.assertEqual(resp.status_code, 502)
+        self.assertEqual(resp.json()["error"], "KB server error (HTTP 500).")
+
+
+class GetPdfViewTests(TestCase):
+    def setUp(self):
+        media_root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, media_root, ignore_errors=True)
+        override = override_settings(MEDIA_ROOT=media_root)
+        override.enable()
+        self.addCleanup(override.disable)
+        self.user = User.objects.create_user("alice", password="pw")
+        accept_terms(self.user)
+        self.client.force_login(self.user)
+        pdf = PDFResource(title="Report", creator=self.user)
+        pdf.file.save("report.pdf", ContentFile(b"%PDF-1.4 served"), save=True)
+        self.url = reverse("get_pdf", kwargs={"filename": pdf.file.name.split("/")[-1]})
+
+    def test_serves_pdf_inline(self):
+        resp = self.client.get(self.url)
+        self.addCleanup(resp.close)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(b"".join(resp.streaming_content), b"%PDF-1.4 served")
+        self.assertTrue(resp["Content-Disposition"].startswith("inline"))
+        self.assertEqual(resp["Content-Type"], "application/pdf")
+
+    def test_requires_login(self):
+        self.client.logout()
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(resp.url.startswith(settings.LOGIN_URL))

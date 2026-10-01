@@ -209,3 +209,17 @@ class DeleteHistoryViewTests(TestCase):
         resp = self.client.post(reverse("ask:delete-history"))
         self.assertEqual(resp.status_code, 405)
         self.assertTrue(Conversation.objects.filter(user=self.user).exists())
+
+
+class MockResponseViewTests(TestCase):
+    def test_returns_llm_shaped_payload(self):
+        user = User.objects.create_user("alice", password="pw")
+        accept_terms(user)
+        self.client.force_login(user)
+        body = self.client.get(reverse("ask:mock-response")).json()
+        self.assertTrue(body["success"])
+        self.assertTrue(body["output"]["content"])
+
+    def test_requires_login(self):
+        resp = self.client.get(reverse("ask:mock-response"))
+        self.assertEqual(resp.status_code, 302)
