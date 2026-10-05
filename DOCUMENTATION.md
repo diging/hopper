@@ -14,8 +14,9 @@ For end-user instructions, see [USER_GUIDE.md](USER_GUIDE.md).
 6. [Agent (LLM) contract](#agent-llm-contract)
 7. [Users, roles and permissions](#users-roles-and-permissions)
 8. [Configuration](#configuration)
-9. [Running Hopper](#running-hopper)
-10. [First-time setup](#first-time-setup)
+9. [Running Hopper Development (Docker)](#running-hopper-development-docker)
+10. [Mock server](#mock-server)
+11. [First-time setup](#first-time-setup)
 
 ## Architecture
 
@@ -32,8 +33,12 @@ flowchart LR
         hopper --> media
     end
     hopper -- "POST agent endpoint<br/>X-API-Key" --> sim[SIM agent workflow]
-    sim -- "MCP tools: search,<br/>get_document_chunks (JWT)" --> mcp[HopperMCP /mcp]
-    hopper -- "HTTP /docs/* (JWT)<br/>add, update, list, delete" --> docs[HopperMCP /docs]
+    subgraph HopperMCP [HopperMCP — hopper-kb-mcp repo]
+        mcp["/mcp<br/>MCP tools"]
+        docs["/docs<br/>Document API"]
+    end
+    sim -- "MCP tools: search,<br/>get_document_chunks (JWT)" --> mcp
+    hopper -- "HTTP /docs/* (JWT)<br/>add, update, list, delete" --> docs
     mcp -. "verify JWT via<br/>/.well-known/jwks.json" .-> hopper
     docs -.-> hopper
 ```
@@ -226,7 +231,7 @@ All paths are relative to `/<APP_ROOT>`. Except for the login page and the allau
 
 | Method | Path | Name | Description |
 |---|---|---|---|
-| GET | `` (root) | `home` | Login page (allauth `LoginView`) |
+| GET | (root) | `home` | Login page (allauth `LoginView`) |
 | GET | `ask/` | `ask:index` | Chat page with no conversation selected |
 | POST | `ask/new/` | `ask:new-conversation` | Create an empty conversation and redirect to it |
 | GET | `ask/c/<id>/` | `ask:conversation` | Chat page for one of the user's conversations (other users' ids redirect to `ask:index`) |
@@ -389,9 +394,29 @@ docker compose exec web bash -c "source .app_env && cd hospexplorer && uv run py
 ```
 ---
 
+## Mock server
+
+The development stack includes a mock of the SIM agent, so Hopper can be run without access to a real SIM installation.
+
+- **What it is:** a [Mockoon](https://mockoon.com/) server (the `mock` service in `docker-compose.yml`, image `mockoon/cli`) that serves the mock definition in `mockoon/llm-mock.json`. It's only part of the development stack; `docker-compose-prod.yml` has no mock.
+- **What it mocks:** the agent endpoint that `llm_connector` calls. It answers `POST /` on port `3000` with `200` and a response in the agent's response format (see [Agent (LLM) contract](#agent-llm-contract)):
+
+  ```json
+  {"success": true, "output": {"content": "Under the shimmering moonlit sky, a silver-maned unicorn named Luna ..."}}
+  ```
+
+  The request body and the `X-API-Key` header aren't checked, and the response is always the same.
+- **How Hopper uses it:** the default `LLM_HOST` is `http://mock:3000/`, the mock's address inside the Compose network. Questions go to the mock whenever no `SimWorkflow` is active, or the active one has no endpoint. Once a workflow is activated in admin, the mock is no longer used.
+- **Limitation:** the mock's `content` is plain text rather than a JSON string with `search_results`. The question is still saved, but polling for the answer fails, so the chat shows "Something went wrong. Please try again." To test the result cards, edit the `body` in `mockoon/llm-mock.json` so that `content` is a JSON string with `search_results`, then restart the `mock` service.
+- **Editing the mock:** `mockoon/llm-mock.json` can be opened in the Mockoon desktop app or edited by hand. Restart the service with `docker compose restart mock` after changes.
+
+Hopper also has a built-in view at `/<APP_ROOT>ask/mock` that returns the same static response, for checking the response format in the browser. Hopper doesn't call this view itself.
+
+---
+
 ## First-time setup
 
-1. **Start the stack** (see [Running Hopper](#running-hopper)) and create an admin account:
+1. **Start the stack** (see [Running Hopper Development (Docker)](#running-hopper-development-docker)) and create an admin account:
    `docker compose exec web bash -c "source .app_env && cd hospexplorer && uv run python manage.py createsuperuser"`
 2. **Start HopperMCP** (its own repo and Compose stack). Point its `JWKS_ENDPOINT` at Hopper's `/<APP_ROOT>.well-known/jwks.json`.
 3. **Create an OIDC client** in Hopper's admin: **OpenID Connect IdP → Clients → Add**. Set **Grant types** to `client_credentials`, save, and copy the secret; **it's shown only once**.
