@@ -17,6 +17,8 @@ from django.shortcuts import render
 from django.urls import path, reverse
 
 from ask.models import (
+    DebugSettings,
+    LLMResponseLog,
     TermsAcceptance,
     SimWorkflow,
     WebsiteResource,
@@ -179,6 +181,42 @@ class SimWorkflowAdmin(admin.ModelAdmin):
             except ValidationError as e:
                 self.message_user(request, e.message, level="error")
                 return
+
+
+@admin.register(DebugSettings)
+class DebugSettingsAdmin(admin.ModelAdmin):
+    list_display = ("__str__", "debug_mode")
+
+    # singleton: only one row, created on demand, never deleted
+    def has_add_permission(self, request):
+        return not DebugSettings.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(LLMResponseLog)
+class LLMResponseLogAdmin(admin.ModelAdmin):
+    list_display = ("id", "created_at")
+    list_filter = ("created_at",)
+    readonly_fields = ("raw_response", "created_at")
+    date_hierarchy = "created_at"
+
+    # raw responses are only accessible while debug mode is enabled
+    def has_module_permission(self, request):
+        return DebugSettings.load().debug_mode and super().has_module_permission(request)
+
+    def has_view_permission(self, request, obj=None):
+        return DebugSettings.load().debug_mode and super().has_view_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        return DebugSettings.load().debug_mode and super().has_delete_permission(request, obj)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
 
 
 class LookupCSVImportMixin:

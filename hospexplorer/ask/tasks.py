@@ -7,7 +7,7 @@ from django.db import close_old_connections
 from django.utils import timezone
 
 import ask.llm_connector
-from ask.models import Conversation, PDFResource, QARecord, QueryTask, WebsiteResource
+from ask.models import Conversation, DebugSettings, LLMResponseLog, PDFResource, QARecord, QueryTask, WebsiteResource
 
 
 logger = logging.getLogger(__name__)
@@ -106,6 +106,10 @@ def run_llm_task(task_id, record_id, conversation_id):
 
         # pass the UUID (not the integer PK) as the LLM backend conversation identifier
         llm_response = ask.llm_connector.query_llm(task.query_text, llm_conversation_id=conversation.llm_conversation_id)
+
+        # log the raw response for admins when debug mode is on (logged before validation so malformed responses are captured too)
+        if DebugSettings.load().debug_mode:
+            LLMResponseLog.objects.create(raw_response=llm_response)
 
         if not llm_response.get("success") or "output" not in llm_response:
             raise ValueError("LLM response is missing structure")

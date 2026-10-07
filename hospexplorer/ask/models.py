@@ -292,3 +292,45 @@ class QARecord(models.Model):
         truncated = self.question_text[:50]
         suffix = "..." if len(self.question_text) > 50 else ""
         return f"{self.user.username}: {truncated}{suffix}"
+
+
+class DebugSettings(models.Model):
+    """
+    Singleton (pk=1) holding admin-controlled debug flags.
+    """
+    debug_mode = models.BooleanField(
+        default=False,
+        help_text="When enabled, raw responses from the AI are logged and viewable in the admin.",
+    )
+
+    class Meta:
+        verbose_name = "Debug Settings"
+        verbose_name_plural = "Debug Settings"
+
+    def __str__(self):
+        return "Debug Settings"
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def load(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+
+class LLMResponseLog(models.Model):
+    """
+    Raw LLM response captured while debug mode is enabled. Intentionally has no link to the question.
+    """
+    raw_response = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "LLM Response Log"
+        verbose_name_plural = "LLM Response Logs"
+
+    def __str__(self):
+        return f"LLM Response {self.id} ({self.created_at})"
