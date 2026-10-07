@@ -200,6 +200,141 @@ class ZipUploadViewTests(TestCase):
         self.assertEqual(pdf.date_published, "2021")
         self.assertEqual(pdf.document_type.name, "Report")
 
+    def test_zip_update_file_overwrites_existing_pdf(self):
+        csv_text = "filename,title\r\nreport.pdf,Annual Report\r\n"
+        zip1 = self._build_zip(csv_text, {"report.pdf": b"%PDF-1.4 original"})
+        self.client.post(reverse("admin:ask_pdfresource_upload_zip"), {"zip_file": zip1})
+
+        zip2 = self._build_zip(csv_text, {"report.pdf": b"%PDF-1.4 updated"})
+        response = self.client.post(
+            reverse("admin:ask_pdfresource_upload_zip"),
+            {"zip_file": zip2, "update_file": "on"},
+        )
+        self.assertEqual(response.status_code, 302)
+
+        self.assertEqual(PDFResource.objects.count(), 1)
+        pdf = PDFResource.objects.get(title="Annual Report")
+        with pdf.file.open("rb") as f:
+            self.assertEqual(f.read(), b"%PDF-1.4 updated")
+
+    def test_zip_update_metadata_refreshes_fields(self):
+        csv_text_1 = "filename,title\r\nreport.pdf,Annual Report\r\n"
+        zip1 = self._build_zip(csv_text_1, {"report.pdf": b"%PDF-1.4 original"})
+        self.client.post(reverse("admin:ask_pdfresource_upload_zip"), {"zip_file": zip1})
+
+        pdf = PDFResource.objects.get(title="Annual Report")
+        self.assertEqual(pdf.date_published, "")
+        self.assertIsNone(pdf.document_type_id)
+
+        csv_text_2 = (
+            "filename,title,date_published,document_type\r\n"
+            "report.pdf,Annual Report,2024-03,Report\r\n"
+        )
+        # second zip's bytes must NOT replace the file when only update_metadata is on
+        zip2 = self._build_zip(csv_text_2, {"report.pdf": b"%PDF-1.4 ignored"})
+        response = self.client.post(
+            reverse("admin:ask_pdfresource_upload_zip"),
+            {"zip_file": zip2, "update_metadata": "on"},
+        )
+        self.assertEqual(response.status_code, 302)
+
+        self.assertEqual(PDFResource.objects.count(), 1)
+        pdf.refresh_from_db()
+        self.assertEqual(pdf.date_published, "2024-03")
+        self.assertEqual(pdf.document_type.name, "Report")
+        with pdf.file.open("rb") as f:
+            self.assertEqual(f.read(), b"%PDF-1.4 original")
+
+    def test_zip_no_update_flags_preserve_skip_behavior(self):
+        csv_text = "filename,title\r\nreport.pdf,Annual Report\r\n"
+        zip1 = self._build_zip(csv_text, {"report.pdf": b"%PDF-1.4 original"})
+        self.client.post(reverse("admin:ask_pdfresource_upload_zip"), {"zip_file": zip1})
+
+        zip2 = self._build_zip(csv_text, {"report.pdf": b"%PDF-1.4 updated"})
+        response = self.client.post(
+            reverse("admin:ask_pdfresource_upload_zip"), {"zip_file": zip2}
+        )
+        self.assertEqual(response.status_code, 302)
+
+        self.assertEqual(PDFResource.objects.count(), 1)
+        pdf = PDFResource.objects.get(title="Annual Report")
+        with pdf.file.open("rb") as f:
+            self.assertEqual(f.read(), b"%PDF-1.4 original")
+
+
+class RunKbResourceUploadReplaceTests(TestCase):
+    def setUp(self):
+        media_root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, media_root, ignore_errors=True)
+        override = override_settings(MEDIA_ROOT=media_root)
+        override.enable()
+        self.addCleanup(override.disable)
+        # the real run_kb_resource_upload closes DB connections in finally —
+        # that kills the TestCase's wrapping transaction connection and breaks
+        # later tests, so neutralize it for this class
+        close_patcher = patch("ask.tasks.close_old_connections")
+        close_patcher.start()
+        self.addCleanup(close_patcher.stop)
+        self.user = User.objects.create_user("curator", password="pw")
+
+    def _make_pdf(self, mcp_id):
+        obj = PDFResource(
+            title="Annual Report",
+            original_filename="report.pdf",
+            creator=self.user,
+            modifier=self.user,
+            mcp_kb_document_id=mcp_id,
+        )
+        obj.file.save("report.pdf", ContentFile(b"%PDF-1.4 test"), save=True)
+        return obj
+
+    def test_replace_deletes_old_doc_then_re_adds(self):
+        from ask import kb_connector
+        from ask.tasks import run_kb_resource_upload
+
+        obj = self._make_pdf(mcp_id=42)
+        with patch.object(kb_connector, "delete_kb_document") as mock_del, patch.object(
+            kb_connector, "add_pdf_to_kb", return_value={"doc_id": 99}
+        ) as mock_add:
+            run_kb_resource_upload("pdf", obj.pk, replace=True)
+
+        mock_del.assert_called_once_with(42)
+        mock_add.assert_called_once()
+        obj.refresh_from_db()
+        self.assertEqual(obj.mcp_kb_document_id, 99)
+        self.assertEqual(obj.status, PDFResource.Status.SUCCESS)
+
+    def test_replace_without_existing_doc_id_skips_delete(self):
+        from ask import kb_connector
+        from ask.tasks import run_kb_resource_upload
+
+        obj = self._make_pdf(mcp_id=None)
+        with patch.object(kb_connector, "delete_kb_document") as mock_del, patch.object(
+            kb_connector, "add_pdf_to_kb", return_value={"doc_id": 99}
+        ) as mock_add:
+            run_kb_resource_upload("pdf", obj.pk, replace=True)
+
+        mock_del.assert_not_called()
+        mock_add.assert_called_once()
+        obj.refresh_from_db()
+        self.assertEqual(obj.mcp_kb_document_id, 99)
+
+    def test_replace_swallows_delete_failure_and_still_adds(self):
+        from ask import kb_connector
+        from ask.tasks import run_kb_resource_upload
+
+        obj = self._make_pdf(mcp_id=42)
+        with patch.object(
+            kb_connector, "delete_kb_document", side_effect=Exception("boom")
+        ), patch.object(
+            kb_connector, "add_pdf_to_kb", return_value={"doc_id": 99}
+        ) as mock_add:
+            run_kb_resource_upload("pdf", obj.pk, replace=True)
+
+        mock_add.assert_called_once()
+        obj.refresh_from_db()
+        self.assertEqual(obj.mcp_kb_document_id, 99)
+
 
 class KBAddPdfResourceViewTests(TestCase):
     """The Track-in-Hopper endpoint for untracked KB PDFs
@@ -218,7 +353,6 @@ class KBAddPdfResourceViewTests(TestCase):
         override = override_settings(MEDIA_ROOT=media_root)
         override.enable()
         self.addCleanup(override.disable)
-
         self.user = User.objects.create_user("curator", password="pw")
         self.user.user_permissions.add(
             Permission.objects.get(codename="add_pdfresource")
