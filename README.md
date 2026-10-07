@@ -16,7 +16,7 @@ This is a Django app with dependencies managed through [uv](https://docs.astral.
 Create the configuration files from the example files:
 
 ```
-cp .app_env_exmaple .app_env
+cp .app_env_example .app_env
 cp .docker-env-example .docker-env
 cp .env-example .env
 ```
@@ -62,6 +62,10 @@ architecture-beta
     hopper:B -- T:sim
     sim:L -- R:mcp
 ```
+
+## Documentation
+
+See [DOCUMENTATION.md](DOCUMENTATION.md) for the architecture, data model, workflows, endpoints, configuration and first-time setup.
 
 ## User Guide
 
