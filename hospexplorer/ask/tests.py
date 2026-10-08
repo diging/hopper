@@ -18,6 +18,7 @@ from ask.models import (
     DocumentType,
     InstitutionType,
     PDFResource,
+    SimWorkflow,
     TermsAcceptance,
 )
 
@@ -95,7 +96,7 @@ class ApplyZipCsvMetadataTests(TestCase):
     def test_creates_lookups_and_sets_fields(self):
         obj = PDFResource(title="Doc")
         warnings = _apply_zip_csv_metadata(obj, {
-            "date_published": "2023-06",
+            "Date Published": "2023-06",
             "document_type": "Report",
             "document_author_institution": "WHO",
             "institution_type": "NGO",
@@ -116,7 +117,7 @@ class ApplyZipCsvMetadataTests(TestCase):
 
     def test_blank_and_missing_columns_are_skipped(self):
         obj = PDFResource(title="Doc")
-        warnings = _apply_zip_csv_metadata(obj, {"document_type": "  ", "date_published": ""})
+        warnings = _apply_zip_csv_metadata(obj, {"document_type": "  ", "Date Published": ""})
         self.assertEqual(warnings, [])
         self.assertEqual(obj.date_published, "")
         self.assertIsNone(obj.document_type_id)
@@ -124,9 +125,9 @@ class ApplyZipCsvMetadataTests(TestCase):
 
     def test_invalid_date_warns_and_leaves_field_blank(self):
         obj = PDFResource(title="Doc")
-        warnings = _apply_zip_csv_metadata(obj, {"date_published": "not-a-date"})
+        warnings = _apply_zip_csv_metadata(obj, {"Date Published": "not-a-date"})
         self.assertEqual(len(warnings), 1)
-        self.assertIn("date_published", warnings[0])
+        self.assertIn("Date Published", warnings[0])
         self.assertEqual(obj.date_published, "")
 
 
@@ -153,7 +154,7 @@ class ZipUploadViewTests(TestCase):
 
     def test_zip_import_applies_csv_metadata(self):
         csv_text = (
-            "filename,title,date_published,document_type,"
+            "filename,title,Date Published,document_type,"
             "document_author_institution,institution_type\r\n"
             "report.pdf,Annual Report,2022,Report,WHO,NGO\r\n"
         )
@@ -186,7 +187,7 @@ class ZipUploadViewTests(TestCase):
     def test_zip_import_tolerates_whitespace_in_csv_header(self):
         # spaces after commas in the header row must not cause rows to be skipped
         csv_text = (
-            "filename, title, date_published, document_type\r\n"
+            "filename, title, Date Published, document_type\r\n"
             "report.pdf,Spaced Report,2021,Report\r\n"
         )
         zip_file = self._build_zip(csv_text, {"report.pdf": b"%PDF-1.4 test"})
@@ -265,13 +266,14 @@ class KBAddPdfResourceViewTests(TestCase):
         self.assertEqual(pdf.title, "Untitled KB doc 7")
 
     @patch("ask.views.download_kb_pdf")
-    def test_duplicate_doc_id_refused(self, mock_download):
+    def test_duplicate_doc_id_merges_into_existing(self, mock_download):
         mock_download.return_value = (None, None)
         first = self._post({"doc_id": 42, "title": "first"})
         self.assertEqual(first.status_code, 200)
         second = self._post({"doc_id": 42, "title": "second"})
-        self.assertEqual(second.status_code, 400)
-        self.assertIn("Already tracked", second.json()["error"])
+        self.assertEqual(second.status_code, 200)
+        self.assertTrue(second.json()["merged"])
+        self.assertEqual(second.json()["id"], first.json()["id"])
         self.assertEqual(PDFResource.objects.filter(mcp_kb_document_id=42).count(), 1)
 
     def test_missing_doc_id_rejected(self):
@@ -400,3 +402,63 @@ class DownloadKBPdfHelperTests(TestCase):
         fname, content = download_kb_pdf(7)
         self.assertEqual(fname, "kb_doc_7.pdf")
         self.assertEqual(content, b"bytes")
+
+
+class SimWorkflowExtractContentTests(TestCase):
+    """response_content_regex tells Hopper where the json part of an agent response is."""
+
+    def _workflow(self, regex):
+        return SimWorkflow(title="wf", workflow_id="wf-1", response_content_regex=regex)
+
+    def test_blank_regex_returns_content_unchanged(self):
+        self.assertEqual(self._workflow("").extract_content('{"a": 1}'), '{"a": 1}')
+
+    def test_capture_group_extracts_json_from_markdown_code_block(self):
+        content = '```json\n{"search_results": []}\n```'
+        wf = self._workflow(r"```(?:json)?\s*(.*?)\s*```")
+        self.assertEqual(wf.extract_content(content), '{"search_results": []}')
+
+    def test_without_group_uses_whole_match(self):
+        content = 'Here you go: {"a": {"b": 1}} thanks'
+        self.assertEqual(self._workflow(r"\{.*\}").extract_content(content), '{"a": {"b": 1}}')
+
+    def test_no_match_returns_content_unchanged(self):
+        self.assertEqual(self._workflow(r"```(.*?)```").extract_content('{"a": 1}'), '{"a": 1}')
+
+    def test_invalid_regex_fails_validation(self):
+        from django.core.exceptions import ValidationError
+        with self.assertRaises(ValidationError):
+            self._workflow("(unclosed").full_clean()
+
+
+class RunLlmTaskResponseRegexTests(TestCase):
+    """run_llm_task applies the active workflow's regex before storing the answer."""
+
+    def setUp(self):
+        from ask.models import Conversation, QARecord, QueryTask
+        self.user = User.objects.create_user("u", "u@example.com", "pw")
+        self.conversation = Conversation.objects.create(user=self.user)
+        self.record = QARecord.objects.create(conversation=self.conversation, user=self.user, question_text="q")
+        self.task = QueryTask.objects.create(user=self.user, query_text="q")
+        SimWorkflow.objects.create(
+            title="wf", workflow_id="wf-1", is_active=True,
+            response_content_regex=r"```(?:json)?\s*(.*?)\s*```",
+        )
+
+    # the task closes db connections when it finishes (it normally runs in its own thread)
+    @patch("ask.tasks.close_old_connections")
+    @patch("ask.llm_connector.query_llm")
+    def test_markdown_wrapped_json_is_extracted(self, mock_query, _mock_close):
+        from ask.models import QueryTask
+        from ask.tasks import run_llm_task
+        mock_query.return_value = {
+            "success": True,
+            "output": {"content": '```json\n{"search_results": []}\n```'},
+        }
+        run_llm_task(self.task.pk, self.record.pk, self.conversation.pk)
+
+        self.task.refresh_from_db()
+        self.record.refresh_from_db()
+        self.assertEqual(self.task.status, QueryTask.Status.COMPLETED)
+        self.assertEqual(json.loads(self.task.result), {"search_results": []})
+        self.assertEqual(json.loads(self.record.answer_text), {"search_results": []})

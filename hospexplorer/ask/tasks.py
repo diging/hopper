@@ -7,7 +7,7 @@ from django.db import close_old_connections
 from django.utils import timezone
 
 import ask.llm_connector
-from ask.models import Conversation, PDFResource, QARecord, QueryTask, WebsiteResource
+from ask.models import Conversation, PDFResource, QARecord, QueryTask, SimWorkflow, WebsiteResource
 
 
 logger = logging.getLogger(__name__)
@@ -113,7 +113,13 @@ def run_llm_task(task_id, record_id, conversation_id):
         # content is a JSON string with search_results from the LLM
         # sent to frontend as is, parsed on the frontend by window.renderChatMessage() in index.html
         content = llm_response["output"].get("content", "")
-        
+
+        # some agents wrap the json in extra text (e.g. a markdown code block);
+        # the active workflow's regex tells us where the json part is
+        active_workflow = SimWorkflow.get_active(SimWorkflow.WorkflowType.AGENT)
+        if active_workflow:
+            content = active_workflow.extract_content(content)
+
         # tag each search result with a type and link PDF hits at the local PDFResource
         content = _enrich_search_results(content)
 
