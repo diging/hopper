@@ -163,7 +163,7 @@ class SimWorkflowAdmin(admin.ModelAdmin):
             "fields": ("title", "description", "workflow_id", "workflow_type"),
         }),
         ("Endpoint", {
-            "fields": ("agent_endpoint",),
+            "fields": ("agent_endpoint", "response_content_regex"),
             "description": "The active workflow's endpoint is used by the LLM connector. "
                            "If no workflow is active or the endpoint is blank, the LLM_HOST env variable is used as fallback.",
         }),

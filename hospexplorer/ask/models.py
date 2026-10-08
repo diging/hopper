@@ -1,7 +1,9 @@
 import logging
+import re
 import uuid
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 
 logger = logging.getLogger(__name__)
@@ -205,6 +207,13 @@ class TermsAcceptance(models.Model):
         return f"{self.user.username} accepted v{self.terms_version} on {self.accepted_at}"
 
 
+def validate_regex(value):
+    try:
+        re.compile(value)
+    except re.error as e:
+        raise ValidationError(f"Invalid regular expression: {e}")
+
+
 class SimWorkflow(models.Model):
     class WorkflowType(models.TextChoices):
         AGENT = "agent", "Agent"
@@ -213,6 +222,15 @@ class SimWorkflow(models.Model):
     description = models.TextField(blank=True, default="")
     workflow_id = models.CharField(max_length=255)
     agent_endpoint = models.URLField(max_length=500, blank=True, default="")
+    response_content_regex = models.CharField(
+        max_length=500,
+        blank=True,
+        default="",
+        validators=[validate_regex],
+        help_text="Optional regex used to extract the JSON content from the agent's response "
+                  "(e.g. when it is wrapped in a markdown code block). If the regex has a capture group, "
+                  "the first group is used, otherwise the whole match. Leave blank to use the response as is.",
+    )
     is_active = models.BooleanField(default=False)
     workflow_type = models.CharField(
         max_length=20,
@@ -228,6 +246,16 @@ class SimWorkflow(models.Model):
     @classmethod
     def get_active(cls, workflow_type):
         return cls.objects.filter(is_active=True, workflow_type=workflow_type).first()
+
+    def extract_content(self, content):
+        """Apply response_content_regex to content. Returns content unchanged if no regex is set or it doesn't match."""
+        if not self.response_content_regex or not isinstance(content, str):
+            return content
+        match = re.search(self.response_content_regex, content, re.DOTALL)
+        if not match:
+            logger.warning("response_content_regex did not match response for workflow %s", self.workflow_id)
+            return content
+        return match.group(1) if match.groups() else match.group(0)
 
     def save(self, *args, **kwargs):
         # constraint: only one workflow per type can be active.
