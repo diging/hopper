@@ -17,9 +17,9 @@ from django.shortcuts import render
 from django.urls import path, reverse
 
 from ask.models import (
-    Conversation,
+    DebugSettings,
+    LLMResponseLog,
     TermsAcceptance,
-    QARecord,
     SimWorkflow,
     WebsiteResource,
     PDFResource,
@@ -82,25 +82,6 @@ class KBDeleteAdminMixin:
             self._warn_if_file_remains(request, obj)
 
 
-class QARecordInline(admin.TabularInline):
-    model = QARecord
-    extra = 0
-    readonly_fields = ("question_text", "question_timestamp", "answer_text", "answer_timestamp", "is_error")
-    fields = ("question_text", "question_timestamp", "answer_text", "answer_timestamp", "is_error")
-
-
-@admin.register(Conversation)
-class ConversationAdmin(admin.ModelAdmin):
-    list_display = ("id", "llm_conversation_id", "title", "user", "qa_record_count", "created_at", "updated_at")
-    list_filter = ("user",)
-    search_fields = ("title", "user__username")
-    readonly_fields = ("id", "llm_conversation_id", "qa_record_count", "created_at", "updated_at")
-
-    def qa_record_count(self, obj):
-        return obj.qa_records.count()
-    qa_record_count.short_description = "Q&A Records"
-
-
 class CustomUserAdmin(UserAdmin):
     add_fieldsets = (
         (None, {
@@ -136,20 +117,6 @@ class TermsAcceptanceAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
-
-
-@admin.register(QARecord)
-class QARecordAdmin(admin.ModelAdmin):
-    list_display = ["id", "user", "conversation", "truncated_question", "question_timestamp", "answer_timestamp", "is_error"]
-    list_filter = ["question_timestamp", "user", "is_error"]
-    search_fields = ["question_text", "answer_text", "user__username"]
-    readonly_fields = ["question_timestamp", "answer_timestamp", "answer_raw_response"]
-    raw_id_fields = ["user", "conversation"]
-    date_hierarchy = "question_timestamp"
-
-    def truncated_question(self, obj):
-        return obj.question_text[:75] + "..." if len(obj.question_text) > 75 else obj.question_text
-    truncated_question.short_description = "Question"
 
 
 @admin.register(SimWorkflow)
@@ -214,6 +181,42 @@ class SimWorkflowAdmin(admin.ModelAdmin):
             except ValidationError as e:
                 self.message_user(request, e.message, level="error")
                 return
+
+
+@admin.register(DebugSettings)
+class DebugSettingsAdmin(admin.ModelAdmin):
+    list_display = ("__str__", "debug_mode")
+
+    # singleton: only one row, created on demand, never deleted
+    def has_add_permission(self, request):
+        return not DebugSettings.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(LLMResponseLog)
+class LLMResponseLogAdmin(admin.ModelAdmin):
+    list_display = ("id", "created_at")
+    list_filter = ("created_at",)
+    readonly_fields = ("raw_response", "created_at")
+    date_hierarchy = "created_at"
+
+    # raw responses are only accessible while debug mode is enabled
+    def has_module_permission(self, request):
+        return DebugSettings.load().debug_mode and super().has_module_permission(request)
+
+    def has_view_permission(self, request, obj=None):
+        return DebugSettings.load().debug_mode and super().has_view_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        return DebugSettings.load().debug_mode and super().has_delete_permission(request, obj)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
 
 
 class LookupCSVImportMixin:

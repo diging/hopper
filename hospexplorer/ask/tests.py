@@ -14,10 +14,15 @@ from django.urls import reverse
 from ask.admin import _apply_zip_csv_metadata
 from ask.admin_csv import validate_partial_date
 from ask.models import (
+    Conversation,
+    DebugSettings,
     DocumentAuthorInstitution,
     DocumentType,
     InstitutionType,
+    LLMResponseLog,
     PDFResource,
+    QARecord,
+    QueryTask,
     TermsAcceptance,
 )
 
@@ -400,3 +405,65 @@ class DownloadKBPdfHelperTests(TestCase):
         fname, content = download_kb_pdf(7)
         self.assertEqual(fname, "kb_doc_7.pdf")
         self.assertEqual(content, b"bytes")
+
+
+# close_old_connections would close the test transaction's connection
+@patch("ask.tasks.close_old_connections")
+class DebugModeLoggingTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user("asker", password="pw")
+        self.conversation = Conversation.objects.create(user=self.user)
+        self.task = QueryTask.objects.create(user=self.user, query_text="secret question")
+        self.record = QARecord.objects.create(
+            conversation=self.conversation, user=self.user, question_text="secret question"
+        )
+        self.llm_response = {"success": True, "output": {"content": "answer"}}
+
+    def _run(self):
+        from ask.tasks import run_llm_task
+        with patch("ask.llm_connector.query_llm", return_value=self.llm_response):
+            run_llm_task(self.task.pk, self.record.pk, self.conversation.pk)
+
+    def test_no_log_when_debug_disabled(self, _close):
+        self._run()
+        self.assertFalse(LLMResponseLog.objects.exists())
+
+    def test_raw_response_logged_when_debug_enabled(self, _close):
+        DebugSettings.objects.create(debug_mode=True)
+        self._run()
+        log = LLMResponseLog.objects.get()
+        self.assertEqual(log.raw_response, self.llm_response)
+
+    def test_malformed_response_still_logged(self, _close):
+        DebugSettings.objects.create(debug_mode=True)
+        self.llm_response = {"success": False}
+        self._run()
+        self.assertEqual(LLMResponseLog.objects.get().raw_response, {"success": False})
+
+
+class DebugSettingsTests(TestCase):
+    def test_singleton(self):
+        DebugSettings(debug_mode=True).save()
+        DebugSettings(debug_mode=False).save()
+        self.assertEqual(DebugSettings.objects.count(), 1)
+        self.assertFalse(DebugSettings.load().debug_mode)
+
+
+class LLMResponseLogAdminTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_superuser("admin", "admin@example.com", "pw")
+        self.client.force_login(self.admin)
+        self.log = LLMResponseLog.objects.create(raw_response={"output": {"content": "x"}})
+        self.changelist_url = reverse("admin:ask_llmresponselog_changelist")
+        self.change_url = reverse("admin:ask_llmresponselog_change", args=[self.log.pk])
+
+    def test_hidden_when_debug_disabled(self):
+        self.assertEqual(self.client.get(self.changelist_url).status_code, 403)
+        self.assertEqual(self.client.get(self.change_url).status_code, 403)
+        self.assertNotContains(self.client.get(reverse("admin:index")), "LLM Response Logs")
+
+    def test_visible_when_debug_enabled(self):
+        DebugSettings.objects.create(debug_mode=True)
+        self.assertEqual(self.client.get(self.changelist_url).status_code, 200)
+        self.assertEqual(self.client.get(self.change_url).status_code, 200)
+        self.assertContains(self.client.get(reverse("admin:index")), "LLM Response Logs")
